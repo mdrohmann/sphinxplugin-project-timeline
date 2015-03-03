@@ -6,7 +6,7 @@ Welcome to test's documentation!
    Milestones
    ==========
 
-   A. something
+   A. some
 
    Deadlines
    =========
@@ -19,7 +19,7 @@ Welcome to test's documentation!
   A -> B;
   }
 
-.. _something:
+.. _some:
 
 Something
 =========
@@ -30,12 +30,21 @@ Something
 
   - some dependency
 
-.. _some dependency:
+.. _some other:
 
 Some dependency
 ===============
 
-:requested-time:`1.5 hrs`
+.. requested-time::
+
+   - 1.5 hrs
+   - 2 hrs
+..
+
+.. dependent-tasks:: II
+
+   - other
+..
 
 
 .. _other:
