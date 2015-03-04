@@ -1,25 +1,36 @@
 # -*- coding: utf-8 -*-
 
 import pytest
+import re
 from docutils import nodes
 from datetime import datetime
 from sphinx_testing import with_app
 from sphinxplugin.projecttimeline import (
-    TimelineChunk, TimelineNode, parse_list_items, identify_time_chunk_name)
+    TimelineChunk, TimelineNode, parse_list_items,
+    split_name_and_submodule, identify_time_chunk_name)
 
 
 with_svg_app = with_app(
     srcdir='tests/docs/basic',
     buildername='html',
-    write_docstring=True,
+    #    write_docstring=True,
     confoverrides={
-        'blockdig_html_image_format': 'SVG'
+        'blockdiag_html_image_format': 'SVG'
     })
 
 
-@with_app(buildername='html', srcdir='tests/docs/basic/')
+@with_svg_app
 def test_build_html(app, status, warning):
     app.builder.build_all()
+    source = (app.outdir / 'index.html').read_text(encoding='utf-8')
+    # assert re.match('<div><img .*? src=".*?.png" .*?/></div>', source)
+
+
+def test_split_names():
+    res = split_name_and_submodule('test 1 (I)')
+    assert res == ['test 1', 0]
+    res = split_name_and_submodule('test 1')
+    assert res == ['test 1']
 
 
 def test_parse_list_items():
@@ -55,8 +66,10 @@ def test_identify_time_chunk_name():
         'test': [('test', 2)],
         'non-unique': [('test', 2), ('other', 1)]
     }
-    assert identify_time_chunk_name('test I', aliases) == [('test', 0)]
-    assert identify_time_chunk_name('test II', aliases) == [('test', 1)]
+    assert identify_time_chunk_name('test (I)', aliases) == [('test', 0)]
+    assert identify_time_chunk_name(
+        'test (I)', aliases, False, True) == [('test (I)')]
+    assert identify_time_chunk_name('test (II)', aliases) == [('test', 1)]
     assert identify_time_chunk_name('test', aliases) == [('test', 0)]
     assert (
         identify_time_chunk_name('test', aliases, True)
@@ -70,16 +83,16 @@ def test_TimelineNode():
     res = tn._parse_list_items(['link1'])
     assert res == [{'time': None, 'xref': 'link1', 'submodules': []}]
     res = tn._parse_list_items(['link1 (I, IV)'])
-    assert res == [{'time': None, 'xref': 'link1', 'submodules': [1, 4]}]
+    assert res == [{'time': None, 'xref': 'link1', 'submodules': [0, 3]}]
     res = tn._parse_list_items(['link1 (i, IV)'])
-    assert res == [{'time': None, 'xref': 'link1', 'submodules': [1, 4]}]
+    assert res == [{'time': None, 'xref': 'link1', 'submodules': [0, 3]}]
     res = tn._parse_list_items(['link1 (i, IV)', 'link2'])
-    assert res == [{'time': None, 'xref': 'link1', 'submodules': [1, 4]},
+    assert res == [{'time': None, 'xref': 'link1', 'submodules': [0, 3]},
                    {'time': None, 'xref': 'link2', 'submodules': []}]
     res = tn._parse_list_items(
         ['2015-01-01 link1 (i, IV)', '02-01-2012 link2'])
     assert res == [
-        {'time': datetime(2015, 1, 1), 'xref': 'link1', 'submodules': [1, 4]},
+        {'time': datetime(2015, 1, 1), 'xref': 'link1', 'submodules': [0, 3]},
         {'time': datetime(2012, 2, 1), 'xref': 'link2', 'submodules': []}]
 
 
@@ -96,6 +109,172 @@ def test_time_delta():
     assert tc.parse_time_delta('20 mins') == 20
     with pytest.raises(ValueError):
         tc.parse_time_delta('')
+
+
+def compute_aliases(tcs):
+    aliases = {}
+    for tc in tcs.values():
+        tc.update_aliases_with_backreference(aliases)
+    return aliases
+
+
+@pytest.fixture
+def mock_tcs():
+    from collections import namedtuple
+    MockParent = namedtuple('parent', ['attributes'])
+    p1 = MockParent({'ids': ['test1']})
+    p2 = MockParent({'ids': ['test2']})
+    tcs = {
+        'test1': TimelineChunk(p1, 'test1'),
+        'test2': TimelineChunk(p2, 'test2')}
+    tc1 = tcs['test1']
+    tc2 = tcs['test2']
+    tc1.time_deltas = [1]
+    tc2.time_deltas = [1]
+    tc1.dependencies = {0: ['test2']}
+
+    return tcs
+
+
+def test_resolve_all_dependencies(mock_tcs):
+
+    tcs = mock_tcs
+
+    aliases = compute_aliases(tcs)
+
+    tn = TimelineNode()
+    tn.resolve_all_dependencies(tcs, aliases)
+
+    root_chunks = tn.root_chunks
+    assert len(root_chunks) == 1
+    assert root_chunks[0].get_full_id() == 'test1 (I)'
+    assert root_chunks[0].children[0].get_full_id() == 'test2 (I)'
+
+
+@pytest.fixture
+def test_resolve_all_dependencies_2(mock_tcs):
+
+    tcs = mock_tcs
+
+    tc1 = tcs['test1']
+    tc1.time_deltas = [1, 1]
+
+    aliases = compute_aliases(tcs)
+
+    tn = TimelineNode()
+    tn.resolve_all_dependencies(tcs, aliases)
+
+    root_chunks = tn.root_chunks
+    assert len(root_chunks) == 2
+    assert root_chunks[0].get_full_id() == 'test1 (I)'
+    assert root_chunks[1].get_full_id() == 'test1 (II)'
+    assert len(root_chunks[1].children) == 0
+    assert root_chunks[0].children[0].get_full_id() == 'test2 (I)'
+
+    return tcs, tn
+
+
+def test_blockdiag_edges(test_resolve_all_dependencies_2):
+    tcs, tn = test_resolve_all_dependencies_2
+    tc1 = tcs['test1']
+    sn1 = tc1.get_submodule(0)
+    lines = []
+    sn1.traverse_edge_lines(lines)
+
+    assert len(lines) == 1
+    assert lines[0] == 'test2-I -> test1-I'
+
+
+def test_blockdiag_edges_2(test_resolve_all_dependencies_2):
+    tcs, tn = test_resolve_all_dependencies_2
+    tc1 = tcs['test1']
+    sn1 = tc1.get_submodule(0)
+    sn1.important = True
+    lines = []
+    sn1.traverse_edge_lines(lines)
+
+    assert len(lines) == 1
+    assert lines[0] == 'test2-I -> test1-I [color = "red"]'
+
+
+def test_blockdiag_nodes(test_resolve_all_dependencies_2):
+    tcs, tn = test_resolve_all_dependencies_2
+    nodes = set()
+    for rc in tn.root_chunks:
+        rc.get_blockdiag_nodes(nodes)
+
+    assert len(nodes) == 3
+    assert 'test1-I [label = "test1 (I)", href = ":ref:`test1`"]' in nodes
+    assert 'test2-I [label = "test2 (I)", href = ":ref:`test2`"]' in nodes
+
+
+def test_blockdiag_nodes_2(test_resolve_all_dependencies_2):
+    tcs, tn = test_resolve_all_dependencies_2
+    nodes = set()
+    rc1 = tn.root_chunks[0]
+    rc1.important = True
+    rc1.group = 'Milestone1'
+    for rc in tn.root_chunks:
+        rc.get_blockdiag_nodes(nodes)
+
+    assert len(nodes) == 3
+    assert (
+        'test1-I '
+        '[group = "Milestone1", linecolor = "red", label = "test1 (I)",'
+        ' href = ":ref:`test1`"]'
+        in nodes)
+    assert 'test2-I [label = "test2 (I)", href = ":ref:`test2`"]' in nodes
+
+
+def test_resolve_all_dependencies_3(mock_tcs):
+
+    tcs = mock_tcs
+    tc2 = tcs['test2']
+    tc2.time_deltas = [1, 1]
+
+    aliases = compute_aliases(tcs)
+
+    tn = TimelineNode()
+    tn.resolve_all_dependencies(tcs, aliases)
+
+    root_chunks = tn.root_chunks
+    assert len(root_chunks) == 1
+    assert root_chunks[0].get_full_id() == 'test1 (I)'
+    assert root_chunks[0].children[0].get_full_id() == 'test2 (I)'
+    assert root_chunks[0].children[1].get_full_id() == 'test2 (II)'
+
+
+def test_resolve_all_dependencies_4(mock_tcs):
+
+    tcs = mock_tcs
+    tc2 = tcs['test2']
+    tc2.dependencies = {0: ['test1']}
+
+    aliases = compute_aliases(tcs)
+
+    tn = TimelineNode()
+    with pytest.raises(ValueError):
+        tn.resolve_all_dependencies(tcs, aliases)
+
+
+def test_resolve_all_dependencies_5(mock_tcs):
+
+    tcs = mock_tcs
+    tc1 = tcs['test1']
+    tc1.time_deltas = [1, 1]
+    tc2 = tcs['test2']
+    tc2.dependencies = {0: ['test1 (I)']}
+
+    aliases = compute_aliases(tcs)
+
+    tn = TimelineNode()
+    tn.resolve_all_dependencies(tcs, aliases)
+    with pytest.raises(ValueError):
+        tc1.get_submodule(0)
+
+
+
+
 
 # class TestTimelineNode(unittest.TestCase):
 #

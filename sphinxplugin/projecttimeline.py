@@ -6,25 +6,50 @@ import sphinxcontrib.blockdiag
 from sphinx.util.nodes import nested_parse_with_titles
 
 
+submodule_split_re = re.compile(
+    r'(?P<name>[^(]+)\(?(?P<submodule>[IVX, ]*)?\)?', re.IGNORECASE)
+submodules_split_re = re.compile(r'[^IVX]*', re.IGNORECASE)
+
+
 def is_list_or_enumeration(node):
     return (isinstance(node, docutils.nodes.bullet_list)
             or isinstance(node, docutils.nodes.enumerated_list))
 
 
-def identify_time_chunk_name(name, aliases, allow_groups=False):
-    parts = re.split(' +', name, 2)
+def id_from_name_and_submodule(name, submodule):
+    return '{} ({})'.format(name, roman.toRoman(submodule + 1))
+
+
+def split_name_and_submodule(name):
+    res = submodule_split_re.match(name)
+    parts = list(res.groups())
+    parts[0] = parts[0].strip()
+    if len(parts[1]) == 0:
+        parts = [parts[0]]
+    else:
+        submodules = submodules_split_re.split(
+            parts[1])
+        parts = [parts[0]] + [
+            roman.fromRoman(submodule.upper()) - 1
+            for submodule in submodules]
+    return parts
+
+
+def identify_time_chunk_name(name, aliases, allow_groups=False,
+                             submodule_ids=False):
+    parts = split_name_and_submodule(name)
     possible_alias = aliases[parts[0]]
     if len(possible_alias) > 1:
         # TODO: add a parser warning
         raise ValueError(
-            "TimeChunk with non-unique identifier {name} requested!"
+            "TimelineChunk with non-unique identifier {name} requested!"
             .format(name=name))
     name = possible_alias[0][0]
-    nsms = possible_alias[0][1]
+#    nsms = possible_alias[0][1]
 
     submodules = None
     if len(parts) == 2:
-        submodules = [roman.fromRoman(parts[1]) - 1]
+        submodules = parts[1:]
     else:
         if allow_groups:
             submodules = range(possible_alias[0][1])
@@ -32,7 +57,9 @@ def identify_time_chunk_name(name, aliases, allow_groups=False):
             submodules = [0]
 
     ret = [(name, sm) for sm in submodules]
-    return ret, nsms
+    if submodule_ids:
+        ret = [id_from_name_and_submodule(x[0], x[1]) for x in ret]
+    return ret  # , nsms
 
 
 def parse_list_items(enumeration):
@@ -49,6 +76,84 @@ def parse_list_items(enumeration):
     return items
 
 
+class SubmoduleNode(object):
+
+    def __init__(self, tcs, fullid):
+        parts = split_name_and_submodule(fullid)
+        self.name = parts[0]
+        self.timechunk = tcs[parts[0]]
+        if len(parts) > 1:
+            self.submodule = parts[1]
+        else:
+            self.submodule = 0
+        self.children = []
+        self.important = False
+        self.group = None
+
+    def set_important(self):
+        self.important = True
+        for child in self.children:
+            child.set_important()
+
+    def get_full_id(self, nowhitespace=False):
+        ret = id_from_name_and_submodule(self.name, self.submodule)
+        if nowhitespace:
+            ret = re.sub(r'[()]', r'', ret)
+            ret = re.sub(r'\W+', r'-', ret)
+        return ret
+
+    def visit_dependency_resolution(self, timechunks, aliases, parents):
+        tc = self.timechunk
+        for dep in tc.get_dependencies(self.submodule):
+            depname = identify_time_chunk_name(dep, aliases, True, True)
+            for sn in depname:
+                if sn in parents:
+                    # TODO: make this a parser error
+                    raise ValueError(
+                        "Cyclic dependency in graph!  {} depends on istself."
+                        .format(sn))
+                self.children.append(SubmoduleNode(timechunks, sn))
+        tc.submodules[self.submodule] = self
+        for child in self.children:
+            child.visit_dependency_resolution(
+                timechunks, aliases, parents + [self.get_full_id()])
+
+    def traverse_edge_lines(self, lines):
+        fi = self.get_full_id(True)
+        for child in self.children:
+            lines.append(
+                self.blockdiag_edge_format(fi, child.get_full_id(True)))
+            child.traverse_edge_lines(lines)
+
+    def blockdiag_edge_format(self, fi, ci):
+        ret = '{} -> {}'.format(ci, fi)
+        options = []
+        if self.important:
+            options.append('color = "red"')
+        if len(options) > 0:
+            ret += ' [{}]'.format(', '.join(options))
+        return ret
+
+    def blockdiag_node_format(self):
+        ret = self.get_full_id(True)
+        pref = self.timechunk.parent.attributes['ids'][-1]
+        options = []
+        if self.group:
+            options.append('group = "{}"'.format(self.group))
+        if self.important:
+            options.append('linecolor = "red"')
+        options.append('label = "{}"'.format(self.get_full_id()))
+        options.append('href = ":ref:`{}`"'.format(pref))
+        if len(options) > 0:
+            ret += ' [{}]'.format(', '.join(options))
+        return ret
+
+    def get_blockdiag_nodes(self, nodes):
+        nodes.add(self.blockdiag_node_format())
+        for child in self.children:
+            child.get_blockdiag_nodes(nodes)
+
+
 class TimelineChunk(object):
 
     tdelta_hours_re = re.compile(
@@ -56,16 +161,30 @@ class TimelineChunk(object):
     tdelta_minutes_re = re.compile(
         r'(?P<minutes>[\d]+)\W*(m|min|mins)')
 
-    def __init__(self, parent, name='unknown'):
+    def __init__(self, parent, name='unknown', docname='unknown'):
         self.parent = parent
         self.name = name
         self.time_deltas = []
         self.dependencies = {}
-        self.children = []
+        self.docname = docname
+        self.submodules = {}
+
+    def get_dependencies(self, num):
+        if num in self.dependencies:
+            return self.dependencies[num]
+        else:
+            return []
 
     def num_submodules(self):
 #        assert len(self.time_deltas) > max(self.dependencies.keys())
         return len(self.time_deltas)
+
+    def get_submodule(self, num):
+        if num in self.submodules:
+            return self.submodules[num]
+        else:
+            raise ValueError(
+                'Submodule does not exist.  Do you have cyclic dependencies?')
 
     def parse_time_delta(self, string):
         hours = self.tdelta_hours_re.search(string)
@@ -124,18 +243,6 @@ class TimelineChunk(object):
                 aliases[cid] = [arg]
         return aliases
 
-    def visit_dependency_resolution(self, timechunks, aliases, parents):
-        for dep in self.dependencies:
-            depname = identify_time_chunk_name(dep, aliases)
-            if depname in parents:
-                # TODO: make this a parser error
-                raise ValueError(
-                    "Cyclic dependency in graph!  {} depends on istself."
-                    .format(depname))
-            self.children.append(timechunks[depname])
-
-            # TODO: I left of HERE
-
 
 class TimelineBlockdiagNode(sphinxcontrib.blockdiag.blockdiag_node):
     name = 'TimelineBlockdiagNode'
@@ -156,13 +263,11 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
     It will be replaced by its children in a later step. (doctree-resolved)
     """
 
-    re_submodules = re.compile(r'\(([IVX,\W]*)\)', re.IGNORECASE)
-    re_submodules_split = re.compile(r'[^IVX]*', re.IGNORECASE)
-
     def _parse_list_items(self, item_strings):
         items = []
         for item_string in item_strings:
-            parts = item_string.split(' ')
+            name_submodule = split_name_and_submodule(item_string)
+            parts = name_submodule[0].split(' ', 2)
             res = {'time': None, 'xref': None, 'submodules': []}
             index = 0
             if len(parts) == 0:
@@ -175,67 +280,88 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
                     index = 1
                 except:
                     pass
-            res['xref'] = parts[index]
-            index += 1
-            if len(parts) >= index + 1:
-                submodules_string = self.re_submodules.sub(
-                    r'\1', ''.join(parts[index:]))
-                if submodules_string != parts[index]:
-                    submodules = self.re_submodules_split.split(
-                        submodules_string)
-                    res['submodules'] = [
-                        roman.fromRoman(submodule.upper())
-                        for submodule in submodules]
+            res['xref'] = ' '.join(parts[index:])
+            res['submodules'] = name_submodule[1:]
 
             items.append(res)
 
         return items
 
-    def resolve_all_dependencies(self, timechunks, aliases):
-        # gather all back-references of dependencies
-        submodules_with_parents = {}
-        for tc in timechunks:
-#            tcname = identify_time_chunk_name(tc.name, aliases)
-            for dep in tc.dependencies:
-                depnames, num_submodules = identify_time_chunk_name(
-                    dep, aliases, True)
-                for dn in depnames:
-                    if dn[0] not in submodules_with_parents:
-                        submodules_with_parents[dn[0]] = {
-                            'num_submodules': num_submodules,
-                            'submodules': set()}
-                    else:
-                        submodules_with_parents[dn[0]]['submodules'].add(dn[1])
-#                if not depname in backrefs:
-#                    backrefs[depname] = [tcname]
-#                else:
-#                    backrefs[depname].append(tcname)
-        nodes_with_parents = set()  # nodes where ALL submodules have parents
-        for node, sm in submodules_with_parents.iteritems():
-            if sm['num_submodules'] == len(sm['submodules']):
-                nodes_with_parents.add(node)
+    def _get_available_submodules(self, timechunks):
+        available_submodules = set()
+        for tk in timechunks.keys():
+            for i in [id_from_name_and_submodule(tk, y)
+                      for y in range(timechunks[tk].num_submodules())]:
+                available_submodules.add(i)
+        return available_submodules
 
-        root_elements = set(timechunks.keys()) - nodes_with_parents
+    def resolve_all_dependencies(self, timechunks, aliases):
+        # gather all root elements (nodes without parents)
+        submodules_with_parents = set()
+        for tc in timechunks.itervalues():
+            alldeps = reduce(
+                lambda x, y: x + y, tc.dependencies.itervalues(), [])
+            for dep in alldeps:
+                depnames = identify_time_chunk_name(
+                    dep, aliases, True, True)
+                for dn in depnames:
+                    submodules_with_parents.add(dn)
+        available_submodules = self._get_available_submodules(timechunks)
+
+        root_elements = available_submodules - submodules_with_parents
         if len(root_elements) == 0:
             # TODO: make this a parser error
             raise ValueError(
                 "All timeline chunks are a dependant of another chunk."
                 "Cyclic dependencies?")
-        self.root_chunks = [timechunks[el] for el in root_elements]
+        self.root_chunks = [
+            SubmoduleNode(timechunks, el) for el in root_elements]
+
         for rc in self.root_chunks:
             rc.visit_dependency_resolution(timechunks, aliases, [])
 
     def _resolve_milestone(self, milestone, timechunks, aliases):
-        submodules = milestone['submodules']
-        ms_key = identify_time_chunk_name(milestone['xref'], aliases)
+        mn = milestone[0]
+        ms = milestone[1]
+        ms_key = identify_time_chunk_name(ms['xref'], aliases)
         ms_chunk = timechunks[ms_key[0][0]]
+        submodules = ms['submodules'] or range(ms_chunk.num_submodules())
+        for sm in submodules:
+            submodule = ms_chunk.get_submodule(sm)
+            submodule.set_important()
+            submodule.group = 'Milestone{}'.format(mn)
 
     def resolve_milestones(self, timechunks, aliases):
-        for milestone in self.milestones:
+        grouplines = []
+        for milestone in enumerate(self.milestones):
             self._resolve_milestone(milestone, timechunks, aliases)
+            grouplines += [
+                'group Milestone{}'.format(milestone[0]) + ' {',
+                '  label = "Milestone {}"'.format(milestone[0]),
+                '  color = "#aaaaaa"',
+                '}']
+        return grouplines
+
+    def _resolve_deadline(self, deadline, timechunks, aliases):
+        dn = deadline[0]
+        dl = deadline[1]
+        dl_key = identify_time_chunk_name(dl['xref'], aliases)
+        dl_chunk = timechunks[dl_key[0][0]]
+        submodules = dl['submodules'] or range(dl_chunk.num_submodules())
+        for sm in submodules:
+            submodule = dl_chunk.get_submodule(sm)
+            submodule.group = 'Deadline{}'.format(dn)
 
     def resolve_deadlines(self, timechunks, aliases):
-        pass
+        grouplines = []
+        for deadline in enumerate(self.deadlines):
+            self._resolve_deadline(deadline, timechunks, aliases)
+            grouplines += [
+                'group Deadline{}'.format(deadline[0]) + ' {',
+                '  label = "Deadline {}"'.format(deadline[1]['time']),
+                '  color = "#bbbbbb"',
+                '}']
+        return grouplines
 
     def _parse_list_items_from_doctree(self, enumeration):
         strings = parse_list_items(enumeration)
@@ -252,7 +378,7 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
         self.milestones = self._get_list_items_from_list(milestones_section)
 
     def add_deadlines_from_section(self, deadlines_section):
-        self.deadines = self._get_list_items_from_list(deadlines_section)
+        self.deadlines = self._get_list_items_from_list(deadlines_section)
 
 
 def node_is_section_with_title(node, title):
@@ -293,7 +419,7 @@ class TimelineChunksDirective(docutils.parsers.rst.Directive):
 
         if parent_name not in env.timeline_chunks:
             env.timeline_chunks[parent_name] = TimelineChunk(
-                parent, parent_name)
+                parent, parent_name, env.docname)
         chunk = env.timeline_chunks[parent_name]
 
         return chunk
@@ -387,7 +513,12 @@ def purge_timelines(app, env, docname):
     """
     purge all environment variables created from the document `docname`.
     """
-    pass
+    if not hasattr(env, 'timeline_chunks'):
+        return
+
+    env.timeline_chunks = dict(
+        [(key, chunk) for (key, chunk) in env.timeline_chunks.iteritems()
+         if chunk.docname != docname])
 
 
 def process_timelines(app, doctree, fromdocname):
@@ -416,10 +547,33 @@ def process_timelines(app, doctree, fromdocname):
         tc.update_aliases_with_backreference(aliases)
 
     tn.resolve_all_dependencies(tcs, aliases)
-    tn.resolve_milestones(tcs, aliases)
-#    tn.resolve_deadlines(tcs, aliases)
-#    import pudb
-#    pudb.set_trace()
+    lines = tn.resolve_milestones(tcs, aliases)
+    lines += tn.resolve_deadlines(tcs, aliases)
+    nodes = set()
+    for rc in tn.root_chunks:
+        rc.traverse_edge_lines(lines)
+        rc.get_blockdiag_nodes(nodes)
+
+    lines = list(nodes) + lines
+
+    tn.blockdiag = sphinxcontrib.blockdiag.blockdiag_node()
+    tn.blockdiag.code = (
+        'blockdiag {{\n\t{}\n}}\n'.format('\n\t'.join(lines)))
+    tn.blockdiag['code'] = tn.blockdiag.code
+    tn.blockdiag['options'] = {}
+    tn.blockdiag['ids'] = tn['ids']
+
+    tn.replace_self(tn.blockdiag)
+
+    # The following line, explicitly resolve the now created blockdiag node.
+    # NB: It might also resolve other blockdiag nodes, but this should be safe.
+    sphinxcontrib.blockdiag.on_doctree_resolved(app, doctree, fromdocname)
+
+
+def on_builder_inited(self):
+    pass
+#    config = self.builder.config
+#    blockdiag_loaded = 'sphinxcontrib.blockdiag' in config.extensions
 
 
 def setup(app):
@@ -437,6 +591,7 @@ def setup(app):
     app.add_directive('timeline', TimelineDirective)
     app.add_directive('env-purge-doc', purge_timelines)
     app.connect('doctree-resolved', process_timelines)
+    app.connect('builder-inited', on_builder_inited)
 
     # TODO:
     # - [ ] add javascript source code in order to manipulate the progress

@@ -13,12 +13,6 @@ Welcome to test's documentation!
 
    - 2015-01-01 other
 
-.. blockdiag::
-
-  {
-  A -> B;
-  }
-
 .. _some:
 
 Something
@@ -28,7 +22,7 @@ Something
 
 .. dependent-tasks::
 
-  - some dependency
+  - some-dependency
 
 .. _some other:
 
