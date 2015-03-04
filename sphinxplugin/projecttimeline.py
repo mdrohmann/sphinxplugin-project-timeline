@@ -1,5 +1,7 @@
 import re
+import math
 import roman
+from datetime import datetime
 import dateutil.parser
 import docutils
 import sphinxcontrib.blockdiag
@@ -9,6 +11,57 @@ from sphinx.util.nodes import nested_parse_with_titles
 submodule_split_re = re.compile(
     r'(?P<name>[^(]+)\(?(?P<submodule>[IVX, ]*)?\)?', re.IGNORECASE)
 submodules_split_re = re.compile(r'[^IVX]*', re.IGNORECASE)
+tdelta_hours_re = re.compile(
+    r'(?P<hours>[\d\.]+)\W*(?!\d*\W*m)(h|hr|hrs)?')
+tdelta_minutes_re = re.compile(
+    r'(?P<minutes>[\d]+)\W*(m|min|mins)')
+
+
+def dt_to_float_days(dt):
+    return float(dt.days + dt.seconds / 3600.)
+
+
+def parse_time_delta(string):
+    hours = tdelta_hours_re.search(string)
+    minutes = tdelta_minutes_re.search(string)
+    res = hours.groupdict() if hours is not None else {'hours': 0}
+    res.update(
+        minutes.groupdict() if minutes is not None else {'minutes': 0})
+
+    res = dict(
+        [(key, float(value)) for (key, value) in res.iteritems()])
+
+    total_minutes = int(res['hours'] * 60. + res['minutes'])
+    if total_minutes == 0:
+        # TODO: make this a parser error
+        raise ValueError('Could not parse the requested time string')
+
+    return total_minutes
+
+
+def add_stats(stats):
+    res = {}
+    for key in ['time_req', 'minutes_worked']:
+        res[key] = sum(stats[key].itervalues())
+    res['time_worked'] = dt_to_float_days(
+        datetime.now() - stats['start_time'])
+    res['done'] = 1. / res['time_req'] * sum(
+        [float(stats['done'][key] * stats['time_req'][key])
+         for key in stats['done'].keys()])
+    if res['done'] == 0:
+        res['work_factor'] = 0
+    else:
+        res['work_factor'] = (
+            res['minutes_worked'] / (res['time_req'] * res['done']))
+    # at least 5 minutes of recorded work...
+    if math.floor(res['time_worked'] * 288) == 0:
+        res['advancement_week'] = 0
+        res['eta'] = float('Inf')
+    else:
+        res['advancement_week'] = res['done'] / (res['time_worked'] * 7)
+        res['eta'] = (
+            (1 - res['complete']) * (res['done'] / res['time_worked']))
+    return res
 
 
 def is_list_or_enumeration(node):
@@ -38,7 +91,7 @@ def split_name_and_submodule(name):
 def identify_time_chunk_name(name, aliases, allow_groups=False,
                              submodule_ids=False):
     parts = split_name_and_submodule(name)
-    possible_alias = aliases[parts[0]]
+    possible_alias = list(aliases[parts[0]])
     if len(possible_alias) > 1:
         # TODO: add a parser warning
         raise ValueError(
@@ -89,11 +142,13 @@ class SubmoduleNode(object):
         self.children = []
         self.important = False
         self.group = None
+        self.stats = None
 
     def set_important(self):
         self.important = True
         for child in self.children:
-            child.set_important()
+            if not child.important:
+                child.set_important()
 
     def get_full_id(self, nowhitespace=False):
         ret = id_from_name_and_submodule(self.name, self.submodule)
@@ -101,6 +156,74 @@ class SubmoduleNode(object):
             ret = re.sub(r'[()]', r'', ret)
             ret = re.sub(r'\W+', r'-', ret)
         return ret
+
+    def compute_work_stats(self, stats):
+        if self.stats is None:
+            tc = self.timechunk
+            sn = self.submodule
+            time_req = tc.get_requested_time(sn)
+            minutes_worked = tc.get_worked_minutes(sn)
+            time_worked = tc.get_worked_time(sn)  # in days
+            complete = tc.get_completeness(sn)
+            if complete == 0:
+                work_factor = 0
+            else:
+                work_factor = (minutes_worked / (time_req * complete))
+
+            # at least 5 minutes of recorded work
+            if math.floor(time_worked * 288) == 0:
+                advancement_week = 0
+                ETA = float('inf')
+            else:
+                advancement_week = (complete / (time_worked * 7))
+                ETA = (1 - complete) * (complete / (time_worked))  # in days
+
+            self.stats = {
+                'time_req': time_req,
+                'minutes_worked': minutes_worked,
+                'time_worked': time_worked,
+                'done': complete,
+                'work_factor': work_factor,
+                'advancement_week': advancement_week,
+                'ETA': ETA,
+            }
+
+            total_stats = {
+                'start_time': datetime.now(), 'time_req': {},
+                'minutes_worked': {}, 'done': {}
+            }
+            for child in self.children:
+                child.compute_work_stats(total_stats)
+
+            fi = self.get_full_id()
+            start_time = tc.get_start_time(sn)
+            if 'start_time' in total_stats:
+                total_stats['start_time'] = min(
+                    start_time, total_stats['start_time'])
+            else:
+                total_stats['start_time'] = start_time
+            total_stats['time_req'][fi] = time_req
+            total_stats['minutes_worked'][fi] = minutes_worked
+            total_stats['done'][fi] = complete
+
+            self.total_stats = total_stats
+        self.merge_stats(stats)
+
+    def merge_stats(self, stats, other_stats=None):
+        if other_stats is None:
+            ts = self.total_stats
+        else:
+            ts = other_stats
+        if len(stats) == 0:
+            stats.update(ts)
+        else:
+            stats['start_time'] = min(ts['start_time'], stats['start_time'])
+            for key in ['time_req', 'minutes_worked', 'done']:
+                stats[key].update(ts[key])
+
+    def get_title_with_submodule(self):
+        return id_from_name_and_submodule(
+            self.timechunk.title, self.submodule)
 
     def visit_dependency_resolution(self, timechunks, aliases, parents):
         tc = self.timechunk
@@ -142,7 +265,7 @@ class SubmoduleNode(object):
             options.append('group = "{}"'.format(self.group))
         if self.important:
             options.append('linecolor = "red"')
-        options.append('label = "{}"'.format(self.get_full_id()))
+        options.append('label = "{}"'.format(self.get_title_with_submodule()))
         options.append('href = ":ref:`{}`"'.format(pref))
         if len(options) > 0:
             ret += ' [{}]'.format(', '.join(options))
@@ -156,24 +279,50 @@ class SubmoduleNode(object):
 
 class TimelineChunk(object):
 
-    tdelta_hours_re = re.compile(
-        r'(?P<hours>[\d\.]+)\W*(?!\d*\W*m)(h|hr|hrs)?')
-    tdelta_minutes_re = re.compile(
-        r'(?P<minutes>[\d]+)\W*(m|min|mins)')
-
-    def __init__(self, parent, name='unknown', docname='unknown'):
+    def __init__(self, parent,
+                 title='unknown', name='unknown', docname='unknown'):
         self.parent = parent
+        self.title = title
         self.name = name
         self.time_deltas = []
         self.dependencies = {}
         self.docname = docname
         self.submodules = {}
+        self.worked_minutes = {}
+        self.start_times = {}
+        self.completeness = {}
 
     def get_dependencies(self, num):
         if num in self.dependencies:
             return self.dependencies[num]
         else:
             return []
+
+    def get_requested_time(self, num):
+        return self.time_deltas[num]
+
+    def get_worked_minutes(self, num):
+        if num in self.worked_minutes:
+            return self.worked_minutes[num]
+        else:
+            return 0
+
+    def get_start_time(self, num):
+        if num in self.start_times:
+            return self.start_times[num]
+        else:
+            return datetime.now()
+
+    def get_worked_time(self, num):
+        st = self.get_start_time(num)
+        now = datetime.now()
+        return dt_to_float_days(now - st)
+
+    def get_completeness(self, num):
+        if num in self.completeness:
+            return self.get_completeness[num]
+        else:
+            return 0
 
     def num_submodules(self):
 #        assert len(self.time_deltas) > max(self.dependencies.keys())
@@ -186,22 +335,45 @@ class TimelineChunk(object):
             raise ValueError(
                 'Submodule does not exist.  Do you have cyclic dependencies?')
 
-    def parse_time_delta(self, string):
-        hours = self.tdelta_hours_re.search(string)
-        minutes = self.tdelta_minutes_re.search(string)
-        res = hours.groupdict() if hours is not None else {'hours': 0}
-        res.update(
-            minutes.groupdict() if minutes is not None else {'minutes': 0})
+    def _parse_worked_on_line(self, line, submodule):
+        res = {'date': None, 'minutes': 0, 'done': 0}
+        parts = re.split(r' +', line, 2)
+        lindex = 0
+        try:
+            time = dateutil.parser.parse(parts[0])
+            self.start_times[submodule] = time
+            lindex = 1
+        except:
+            pass
 
-        res = dict(
-            [(key, float(value)) for (key, value) in res.iteritems()])
+        nline = ' '.join(parts[lindex:])
+        res = re.search(r'([\d\.]+) *%', nline)
+        if res:
+            nline = nline[0:res.start()]
+            self.completeness[submodule] = float(res.group())
+        self.worked_minutes[submodule] = parse_time_delta(nline)
 
-        total_minutes = int(res['hours'] * 60. + res['minutes'])
-        if total_minutes == 0:
-            # TODO: make this a parser error
-            raise ValueError('Could not parse the requested time string')
+    def _parse_worked_strings(self, worked_strings, submodule):
+        for ws in worked_strings:
+            self._parse_worked_on_line(ws, submodule)
 
-        return total_minutes
+    def parse_worked_on(self, text_or_node, submodule):
+
+        if len(submodule) == 0:
+            submodule = 0
+        else:
+            submodule = roman.fromRoman(submodule[0]) - 1
+
+        worked_strings = []
+        if isinstance(text_or_node, basestring):
+            worked_strings = [text_or_node]
+        else:
+            enumerations = text_or_node.traverse(is_list_or_enumeration)
+            for enumeration in enumerations:
+                worked_strings += parse_list_items(text_or_node)
+
+        self._parse_worked_strings(worked_strings, submodule)
+
 
     def parse_dependencies(self, text_or_node, submodule):
 
@@ -232,15 +404,15 @@ class TimelineChunk(object):
                 time_strings += parse_list_items(text_or_node)
 
         self.time_deltas = [
-            self.parse_time_delta(time_string) for time_string in time_strings]
+            parse_time_delta(time_string) for time_string in time_strings]
 
     def update_aliases_with_backreference(self, aliases):
         arg = (self.name, self.num_submodules())
-        for cid in self.parent.attributes['ids']:
+        for cid in [self.title] + self.parent.attributes['ids']:
             if cid in aliases.keys():
-                aliases[cid].append(arg)
+                aliases[cid].add(arg)
             else:
-                aliases[cid] = [arg]
+                aliases[cid] = set([arg])
         return aliases
 
 
@@ -320,7 +492,7 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
         for rc in self.root_chunks:
             rc.visit_dependency_resolution(timechunks, aliases, [])
 
-    def _resolve_milestone(self, milestone, timechunks, aliases):
+    def _resolve_milestone(self, milestone, timechunks, aliases, stats):
         mn = milestone[0]
         ms = milestone[1]
         ms_key = identify_time_chunk_name(ms['xref'], aliases)
@@ -328,19 +500,23 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
         submodules = ms['submodules'] or range(ms_chunk.num_submodules())
         for sm in submodules:
             submodule = ms_chunk.get_submodule(sm)
+            stats = submodule.compute_work_stats(stats)
             submodule.set_important()
             submodule.group = 'Milestone{}'.format(mn)
 
     def resolve_milestones(self, timechunks, aliases):
         grouplines = []
+        stats = []
         for milestone in enumerate(self.milestones):
-            self._resolve_milestone(milestone, timechunks, aliases)
+            mstats = {}
+            self._resolve_milestone(milestone, timechunks, aliases, mstats)
+            stats.append(add_stats(mstats))
             grouplines += [
                 'group Milestone{}'.format(milestone[0]) + ' {',
                 '  label = "Milestone {}"'.format(milestone[0]),
                 '  color = "#aaaaaa"',
                 '}']
-        return grouplines
+        return grouplines, stats
 
     def _resolve_deadline(self, deadline, timechunks, aliases):
         dn = deadline[0]
@@ -418,11 +594,36 @@ class TimelineChunksDirective(docutils.parsers.rst.Directive):
         parent_name = parent_name[0]
 
         if parent_name not in env.timeline_chunks:
+            title = (
+                ' '.join([t.astext() for t in (parent
+                         .traverse(docutils.nodes.title)[0]
+                         .traverse(docutils.nodes.Text))]))
             env.timeline_chunks[parent_name] = TimelineChunk(
-                parent, parent_name, env.docname)
+                parent, title, parent_name, env.docname)
         chunk = env.timeline_chunks[parent_name]
 
         return chunk
+
+
+class TimelineWorkedOnDirective(TimelineChunksDirective):
+
+    def run(self):
+        chunk = self.get_chunk_for_node(self.state.document, self.state)
+
+        nested_node = docutils.nodes.paragraph()
+        nested_parse_with_titles(self.state, self.content, nested_node)
+
+        chunk.parse_worked_on(nested_node)
+
+        return []
+
+    @classmethod
+    def role(cls, name, rawtext, text, lineno, inliner,
+             options={}, content=[]):
+        chunk = cls.get_chunk_for_node(inliner.document, inliner)
+
+        chunk.parse_worked_on(text)
+        return [], []
 
 
 class TimelineRequestedDirective(TimelineChunksDirective):
@@ -547,12 +748,15 @@ def process_timelines(app, doctree, fromdocname):
         tc.update_aliases_with_backreference(aliases)
 
     tn.resolve_all_dependencies(tcs, aliases)
-    lines = tn.resolve_milestones(tcs, aliases)
+    lines, meta = tn.resolve_milestones(tcs, aliases)
     lines += tn.resolve_deadlines(tcs, aliases)
     nodes = set()
     for rc in tn.root_chunks:
         rc.traverse_edge_lines(lines)
         rc.get_blockdiag_nodes(nodes)
+
+    import pudb
+    pudb.set_trace()
 
     lines = list(nodes) + lines
 
@@ -580,6 +784,10 @@ def setup(app):
 
     app.add_node(TimelineBlockdiagNode)
     app.add_node(TimelineNode)
+    app.add_role(
+        'worked-on',
+        lambda *args: TimelineWorkedOnDirective.role(*args))
+    app.add_directive('worked-on', TimelineWorkedOnDirective)
     app.add_role(
         'requested-time',
         lambda *args: TimelineRequestedDirective.role(*args))

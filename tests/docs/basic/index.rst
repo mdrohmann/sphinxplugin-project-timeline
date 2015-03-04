@@ -22,7 +22,7 @@ Something
 
 .. dependent-tasks::
 
-  - some-dependency
+  - Some dependency
 
 .. _some other:
 
@@ -46,4 +46,4 @@ Some dependency
 Other task
 ==========
 
-:requested-time:`3.5 hrs`
+:requested-time:`3.25 hrs`

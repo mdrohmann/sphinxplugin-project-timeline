@@ -7,7 +7,8 @@ from datetime import datetime
 from sphinx_testing import with_app
 from sphinxplugin.projecttimeline import (
     TimelineChunk, TimelineNode, parse_list_items,
-    split_name_and_submodule, identify_time_chunk_name)
+    split_name_and_submodule, identify_time_chunk_name,
+    parse_time_delta)
 
 
 with_svg_app = with_app(
@@ -98,17 +99,16 @@ def test_TimelineNode():
 
 def test_time_delta():
 
-    tc = TimelineChunk(None)
-    assert tc.parse_time_delta('1 hr') == 60
-    assert tc.parse_time_delta('1') == 60
-    assert tc.parse_time_delta('1h') == 60
-    assert tc.parse_time_delta('1 hrs') == 60
-    assert tc.parse_time_delta('1.5 hrs') == 90
-    assert tc.parse_time_delta('1.5 hrs 20m') == 110
-    assert tc.parse_time_delta('20 min') == 20
-    assert tc.parse_time_delta('20 mins') == 20
+    assert parse_time_delta('1 hr') == 60
+    assert parse_time_delta('1') == 60
+    assert parse_time_delta('1h') == 60
+    assert parse_time_delta('1 hrs') == 60
+    assert parse_time_delta('1.5 hrs') == 90
+    assert parse_time_delta('1.5 hrs 20m') == 110
+    assert parse_time_delta('20 min') == 20
+    assert parse_time_delta('20 mins') == 20
     with pytest.raises(ValueError):
-        tc.parse_time_delta('')
+        parse_time_delta('')
 
 
 def compute_aliases(tcs):
@@ -125,8 +125,8 @@ def mock_tcs():
     p1 = MockParent({'ids': ['test1']})
     p2 = MockParent({'ids': ['test2']})
     tcs = {
-        'test1': TimelineChunk(p1, 'test1'),
-        'test2': TimelineChunk(p2, 'test2')}
+        'test1': TimelineChunk(p1, 'test1', 'test1'),
+        'test2': TimelineChunk(p2, 'Test 2', 'test2')}
     tc1 = tcs['test1']
     tc2 = tcs['test2']
     tc1.time_deltas = [1]
@@ -205,7 +205,7 @@ def test_blockdiag_nodes(test_resolve_all_dependencies_2):
 
     assert len(nodes) == 3
     assert 'test1-I [label = "test1 (I)", href = ":ref:`test1`"]' in nodes
-    assert 'test2-I [label = "test2 (I)", href = ":ref:`test2`"]' in nodes
+    assert 'test2-I [label = "Test 2 (I)", href = ":ref:`test2`"]' in nodes
 
 
 def test_blockdiag_nodes_2(test_resolve_all_dependencies_2):
@@ -223,7 +223,7 @@ def test_blockdiag_nodes_2(test_resolve_all_dependencies_2):
         '[group = "Milestone1", linecolor = "red", label = "test1 (I)",'
         ' href = ":ref:`test1`"]'
         in nodes)
-    assert 'test2-I [label = "test2 (I)", href = ":ref:`test2`"]' in nodes
+    assert 'test2-I [label = "Test 2 (I)", href = ":ref:`test2`"]' in nodes
 
 
 def test_resolve_all_dependencies_3(mock_tcs):
