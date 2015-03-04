@@ -24,3 +24,4 @@ setuptools-*.zip
 /_scratch/
 README.html
 dropin.cache
+/htmlcov/
