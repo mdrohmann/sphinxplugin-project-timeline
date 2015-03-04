@@ -5,6 +5,7 @@ from datetime import datetime
 import dateutil.parser
 import docutils
 import sphinxcontrib.blockdiag
+from docutils import nodes
 from sphinx.util.nodes import nested_parse_with_titles
 
 
@@ -15,6 +16,81 @@ tdelta_hours_re = re.compile(
     r'(?P<hours>[\d\.]+)\W*(?!\d*\W*m)(h|hr|hrs)?')
 tdelta_minutes_re = re.compile(
     r'(?P<minutes>[\d]+)\W*(m|min|mins)')
+
+
+def make_descriptions_from_meta(meta, name):
+    rows = []
+    for i, mrow in enumerate(meta):
+        nam = '{} {}'.format(name, i + 1)
+        r_req_time = float(mrow['time_req']) / 60.
+        r_worked = float(mrow['minutes_worked']) / 60.
+        r_done = mrow['done']
+        r_days = float(mrow['time_worked'])
+
+        if r_done == 0:
+            r_factor = 0
+        else:
+            r_factor = (r_worked / (r_req_time * r_done))
+
+        # at least 5 minutes of recorded work
+        if math.floor(r_days * 288) == 0:
+            advancement_week = 0
+            r_ETA = float('inf')
+        else:
+            advancement_week = (r_done / (r_days * 7))
+            r_ETA = (1 - r_done) * (r_done / (r_days))  # in days
+
+        req_time = '{:0.2f} h'.format(r_req_time)
+        hrs_spent = '{:0.2f} h'.format(r_worked)
+        hrs_left1 = '{:0.2f} h'.format(max(r_req_time - r_worked, 0))
+        hrs_left2 = '{:0.2f} h'.format(
+            max(r_req_time * r_factor - r_worked, 0))
+        days_spent = '{:0.2f} d'.format(int(r_days))
+        work_factor = '{:0.2f}'.format(r_factor)
+        advancement_week = '{:0.0f} %'.format(r_factor * 100)
+        ETA = '{:0.2f} d'.format(r_ETA)
+        rows.append([
+            nam, req_time, hrs_spent, hrs_left1, hrs_left2,
+            days_spent, work_factor, advancement_week, ETA
+        ])
+
+    return rows
+
+
+def description_table(descriptions, widths, headers):
+    # generate table-root
+    tgroup = nodes.tgroup(cols=len(widths))
+    for width in widths:
+        tgroup += nodes.colspec(colwidth=width)
+    table = nodes.table()
+    table += tgroup
+
+    # generate table-header
+    thead = nodes.thead()
+    row = nodes.row()
+    for header in headers:
+        entry = nodes.entry()
+        entry += nodes.paragraph(text=header)
+        row += entry
+    thead += row
+    tgroup += thead
+
+    # generate table-body
+    tbody = nodes.tbody()
+    for desc in descriptions:
+        row = nodes.row()
+        for col in desc:
+            entry = nodes.entry()
+            if not isinstance(col, basestring):
+                col = str(col)
+            paragraph = nodes.paragraph()
+            paragraph += nodes.Text(col)
+            entry += paragraph
+            row += entry
+        tbody += row
+    tgroup += tbody
+
+    return table
 
 
 def dt_to_float_days(dt):
@@ -48,19 +124,6 @@ def add_stats(stats):
     res['done'] = 1. / res['time_req'] * sum(
         [float(stats['done'][key] * stats['time_req'][key])
          for key in stats['done'].keys()])
-    if res['done'] == 0:
-        res['work_factor'] = 0
-    else:
-        res['work_factor'] = (
-            res['minutes_worked'] / (res['time_req'] * res['done']))
-    # at least 5 minutes of recorded work...
-    if math.floor(res['time_worked'] * 288) == 0:
-        res['advancement_week'] = 0
-        res['eta'] = float('Inf')
-    else:
-        res['advancement_week'] = res['done'] / (res['time_worked'] * 7)
-        res['eta'] = (
-            (1 - res['complete']) * (res['done'] / res['time_worked']))
     return res
 
 
@@ -165,27 +228,11 @@ class SubmoduleNode(object):
             minutes_worked = tc.get_worked_minutes(sn)
             time_worked = tc.get_worked_time(sn)  # in days
             complete = tc.get_completeness(sn)
-            if complete == 0:
-                work_factor = 0
-            else:
-                work_factor = (minutes_worked / (time_req * complete))
-
-            # at least 5 minutes of recorded work
-            if math.floor(time_worked * 288) == 0:
-                advancement_week = 0
-                ETA = float('inf')
-            else:
-                advancement_week = (complete / (time_worked * 7))
-                ETA = (1 - complete) * (complete / (time_worked))  # in days
-
             self.stats = {
                 'time_req': time_req,
                 'minutes_worked': minutes_worked,
                 'time_worked': time_worked,
                 'done': complete,
-                'work_factor': work_factor,
-                'advancement_week': advancement_week,
-                'ETA': ETA,
             }
 
             total_stats = {
@@ -755,19 +802,35 @@ def process_timelines(app, doctree, fromdocname):
         rc.traverse_edge_lines(lines)
         rc.get_blockdiag_nodes(nodes)
 
-    import pudb
-    pudb.set_trace()
+    headers = [
+        '==============',
+        'Requested time',
+        'Spent work hrs',
+        'Hours left I  ',
+        'Hours left II ',
+        'Spent days    ',
+        'Work factor   ',
+        'Advance / week',
+        'ETA           ',
+    ]
+    widths = [16] * len(headers)
+    descriptions = make_descriptions_from_meta(meta, 'Milestone')
+
+    table = description_table(descriptions, widths, headers)
 
     lines = list(nodes) + lines
 
+    paragraph = docutils.nodes.paragraph()
     tn.blockdiag = sphinxcontrib.blockdiag.blockdiag_node()
+    paragraph += tn.blockdiag
+    paragraph += table
     tn.blockdiag.code = (
         'blockdiag {{\n\t{}\n}}\n'.format('\n\t'.join(lines)))
     tn.blockdiag['code'] = tn.blockdiag.code
     tn.blockdiag['options'] = {}
     tn.blockdiag['ids'] = tn['ids']
 
-    tn.replace_self(tn.blockdiag)
+    tn.replace_self(paragraph)
 
     # The following line, explicitly resolve the now created blockdiag node.
     # NB: It might also resolve other blockdiag nodes, but this should be safe.
