@@ -14,7 +14,7 @@ from sphinxplugin.utils import (
 
 
 with_svg_app = with_app(
-    srcdir='tests/docs/basic',
+    srcdir='tests/docs/complete',
     buildername='html',
     #    write_docstring=True,
     confoverrides={
@@ -26,6 +26,7 @@ with_svg_app = with_app(
 def test_build_html(app, status, warning):
     app.builder.build_all()
     source = (app.outdir / 'index.html').read_text(encoding='utf-8')
+    print source
     # assert re.match('<div><img .*? src=".*?.png" .*?/></div>', source)
 
 

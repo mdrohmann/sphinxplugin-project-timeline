@@ -11,7 +11,7 @@ Welcome to test's documentation!
    Deadlines
    =========
 
-   - 2015-01-01 other
+   - 2015-01-01 Some dependency
 
 .. _some:
 
