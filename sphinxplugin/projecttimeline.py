@@ -15,6 +15,9 @@ def purge_timelines(app, env, docname):
     env.timeline_chunks = dict(
         [(key, chunk) for (key, chunk) in env.timeline_chunks.iteritems()
          if chunk.docname != docname])
+    env.timeline_groups = dict(
+        [(key, group) for (key, group) in env.timeline_chunks.iteritems()
+         if group.docname != docname])
 
 
 def task_group_role(name, rawtext, text, lineno, inliner,
@@ -25,7 +28,10 @@ def task_group_role(name, rawtext, text, lineno, inliner,
     if not hasattr(env, 'timeline_groups'):
         env.timeline_groups = {}
 
-    env.timeline_groups[text] = inliner.parent
+    env.timeline_groups[text] = {
+        'parent': inliner.parent,
+        'docname': inliner.docname
+    }
 
     return [], []
 

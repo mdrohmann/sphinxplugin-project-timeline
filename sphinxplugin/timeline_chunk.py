@@ -145,7 +145,7 @@ class TimelineChunk(object):
                 aliases[cid.lower()] = set([arg])
 
         for gk, gv in groups.iteritems():
-            if self.parent.parent == gv:
+            if self.parent.parent == gv['parent']:
                 if gk in aliases.keys():
                     aliases[gk.lower()].add(arg)
                 else:
