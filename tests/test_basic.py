@@ -5,8 +5,10 @@ import re
 from docutils import nodes
 from datetime import datetime
 from sphinx_testing import with_app
-from sphinxplugin.projecttimeline import (
-    TimelineChunk, TimelineNode, parse_list_items,
+from sphinxplugin.timeline_chunk import TimelineChunk
+from sphinxplugin.nodes import TimelineNode
+from sphinxplugin.utils import (
+    parse_list_items,
     split_name_and_submodule, identify_time_chunk_name,
     parse_time_delta)
 
@@ -67,6 +69,7 @@ def test_identify_time_chunk_name():
         'test': [('test', 2)],
         'non-unique': [('test', 2), ('other', 1)]
     }
+
     assert identify_time_chunk_name('test (I)', aliases) == [('test', 0)]
     assert identify_time_chunk_name(
         'test (I)', aliases, False, True) == [('test (I)')]
@@ -114,7 +117,7 @@ def test_time_delta():
 def compute_aliases(tcs):
     aliases = {}
     for tc in tcs.values():
-        tc.update_aliases_with_backreference(aliases)
+        tc.update_aliases_with_backreference(aliases, {})
     return aliases
 
 
