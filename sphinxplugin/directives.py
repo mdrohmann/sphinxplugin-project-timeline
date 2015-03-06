@@ -1,7 +1,7 @@
 import re
 import docutils.parsers
 from sphinx.util.nodes import nested_parse_with_titles
-from .timeline_chunk import TimelineChunk
+from .timeline_chunk import TimelineChunksContainer
 from .nodes import TimelineNode
 from . import utils
 
@@ -20,43 +20,26 @@ class TimelineChunksDirective(docutils.parsers.rst.Directive):
         env = document.settings.env
 
         if not hasattr(env, 'timeline_chunks'):
-            env.timeline_chunks = {}
+            env.timeline_chunks = TimelineChunksContainer()
 
-        parent = node.parent
-        parent_name = parent.attributes['ids']
-        if not isinstance(parent, docutils.nodes.section):
-            # TODO: make this an error in the parser
-            raise ValueError('parent of timeline chunk is not a section!')
-        if len(parent_name) == 0:
-            # TODO: make this a warning or error in the parser
-            raise ValueError('no id found name for timeline chunk.')
-        elif len(parent_name) > 1:
-            # TODO: add a warning that the timeline chunk is not unique
-            raise ValueError('timeline chunk is not unique.')
-
-        parent_name = parent_name[0]
-
-        if parent_name not in env.timeline_chunks:
-            title = (
-                ' '.join([t.astext() for t in (parent
-                         .traverse(docutils.nodes.title)[0]
-                         .traverse(docutils.nodes.Text))]))
-            env.timeline_chunks[parent_name] = TimelineChunk(
-                parent, title, parent_name, env.docname)
-        chunk = env.timeline_chunks[parent_name]
+        chunk = env.timeline_chunks.add_chunk(node.parent, env.docname)
 
         return chunk
 
     def check_argument_is_roman(self, arguments):
+        if len(arguments) == 0:
+            return ['I']
         ret = []
         for arg in arguments:
             rres = self.roman_re.match(arg)
             if rres:
-                ret += rres.group()
+                ret.append(rres.group())
         return ret
 
 
 class TimelineWorkedOnDirective(TimelineChunksDirective):
+
+    optional_arguments = 1
 
     def run(self):
         chunk = self.get_chunk_for_node(self.state.document, self.state)
@@ -66,7 +49,8 @@ class TimelineWorkedOnDirective(TimelineChunksDirective):
 
         arguments = self.check_argument_is_roman(self.arguments)
 
-        chunk.parse_worked_on(nested_node, arguments)
+        for argument in arguments:
+            chunk.parse_worked_on(nested_node, argument)
 
         return []
 
@@ -75,7 +59,7 @@ class TimelineWorkedOnDirective(TimelineChunksDirective):
              options={}, content=[]):
         chunk = cls.get_chunk_for_node(inliner.document, inliner)
 
-        chunk.parse_worked_on(text)
+        chunk.parse_worked_on(text, 'I')
         return [], []
 
 
@@ -112,7 +96,9 @@ class TimelineDependencyDirective(TimelineChunksDirective):
 
         arguments = self.check_argument_is_roman(self.arguments)
 
-        chunk.parse_dependencies(nested_node, arguments)
+        for argument in arguments:
+            chunk.parse_dependencies(nested_node, argument)
+
         return []
 
     @classmethod
@@ -120,7 +106,7 @@ class TimelineDependencyDirective(TimelineChunksDirective):
              options={}, content=[]):
         chunk = cls.get_chunk_for_node(inliner.document, inliner)
 
-        chunk.parse_dependencies(text, ['I'])
+        chunk.parse_dependencies(text, 'I')
         return [], []
 
 

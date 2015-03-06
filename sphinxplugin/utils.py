@@ -1,7 +1,7 @@
 import re
 import math
 from docutils import nodes
-from datetime import datetime
+from datetime import datetime, timedelta
 import docutils
 import roman
 
@@ -29,7 +29,7 @@ def make_descriptions_from_meta(meta, name):
         nam = '{} {}'.format(name, i + 1)
         r_req_time = float(mrow['time_req']) / 60.
         r_worked = float(mrow['minutes_worked']) / 60.
-        r_done = mrow['done']
+        r_done = float(mrow['done'])
         r_days = float(mrow['time_worked'])
 
         if r_done == 0:
@@ -42,21 +42,29 @@ def make_descriptions_from_meta(meta, name):
             advancement_week = 0
             r_ETA = float('inf')
         else:
-            advancement_week = (r_done / (r_days * 7))
-            r_ETA = (1 - r_done) * (r_done / (r_days))  # in days
+            advancement_week = (r_done / (r_days / 7.))
+            r_ETA = (1. - r_done) * (r_days / (r_done))  # in days
 
         req_time = '{:0.2f} h'.format(r_req_time)
         hrs_spent = '{:0.2f} h'.format(r_worked)
+        prc_done = '{:2.1f} %'.format(r_done * 100)
         hrs_left1 = '{:0.2f} h'.format(max(r_req_time - r_worked, 0))
         hrs_left2 = '{:0.2f} h'.format(
             max(r_req_time * r_factor - r_worked, 0))
         days_spent = '{:0.2f} d'.format(int(r_days))
         work_factor = '{:0.2f}'.format(r_factor)
-        advancement_week = '{:0.0f} %'.format(r_factor * 100)
-        ETA = '{:0.2f} d'.format(r_ETA)
+        advancement_week = '{:0.0f} %'.format(advancement_week * 100)
+        if r_ETA == float('inf'):
+            ETA = 'undefined'
+            ETA2 = 'undefined'
+        else:
+            r_ETA1 = datetime.now() + timedelta(int(r_ETA))
+            r_ETA2 = datetime.now() + timedelta(int(r_ETA/r_factor))
+            ETA = '{}'.format(r_ETA1.strftime('%Y-%m-%d'))
+            ETA2 = '{}'.format(r_ETA2.strftime('%Y-%m-%d'))
         rows.append([
-            nam, req_time, hrs_spent, hrs_left1, hrs_left2,
-            days_spent, work_factor, advancement_week, ETA
+            nam, req_time, prc_done, hrs_spent, hrs_left1, hrs_left2,
+            days_spent, work_factor, advancement_week, ETA, ETA2
         ])
 
     return rows
@@ -158,42 +166,6 @@ def split_name_and_submodule(name):
 
 def slugify(name):
     return re.sub(r'[\W_]+', r'-', name.lower())
-
-
-def identify_time_chunk_name(name, aliases, allow_groups=False,
-                             submodule_ids=False):
-    parts = split_name_and_submodule(name)
-    # TODO: use pending_xrefs to resolve the links
-    try:
-        possible_alias = list(aliases[parts[0].lower()])
-    except KeyError:
-        possible_alias = list(aliases[slugify(parts[0])])
-
-    if not allow_groups and len(possible_alias) > 1:
-        # TODO: add a parser warning
-        raise ValueError(
-            "TimelineChunk with non-unique identifier {name} requested!"
-            .format(name=name))
-
-    ret = []
-    for pa in possible_alias:
-        name = pa[0]
-    #    nsms = possible_alias[0][1]
-
-        submodules = None
-        if len(parts) == 2:
-            submodules = parts[1:]
-        else:
-            if allow_groups:
-                submodules = range(pa[1])
-            else:
-                submodules = [0]
-
-        ret_t = [(name, sm) for sm in submodules]
-        if submodule_ids:
-            ret_t = [id_from_name_and_submodule(x[0], x[1]) for x in ret_t]
-        ret += ret_t
-    return ret  # , nsms
 
 
 def parse_list_items(enumeration):

@@ -1,3 +1,4 @@
+from .timeline_chunk import TimelineChunksContainer
 from .nodes import (TimelineBlockdiagNode, TimelineNode)
 from .directives import (
     TimelineWorkedOnDirective, TimelineRequestedDirective,
@@ -12,12 +13,7 @@ def purge_timelines(app, env, docname):
     if not hasattr(env, 'timeline_chunks'):
         return
 
-    env.timeline_chunks = dict(
-        [(key, chunk) for (key, chunk) in env.timeline_chunks.iteritems()
-         if chunk.docname != docname])
-    env.timeline_groups = dict(
-        [(key, group) for (key, group) in env.timeline_chunks.iteritems()
-         if group.docname != docname])
+    env.timeline_chunks.purge_docname()
 
 
 def task_group_role(name, rawtext, text, lineno, inliner,
@@ -25,13 +21,10 @@ def task_group_role(name, rawtext, text, lineno, inliner,
 
     env = inliner.document.settings.env
 
-    if not hasattr(env, 'timeline_groups'):
-        env.timeline_groups = {}
+    if not hasattr(env, 'timeline_chunks'):
+        env.timeline_chunks = TimelineChunksContainer()
 
-    env.timeline_groups[text] = {
-        'parent': inliner.parent,
-        'docname': inliner.docname
-    }
+    env.timeline_chunks.add_group(text, inliner.parent, inliner.docname)
 
     return [], []
 

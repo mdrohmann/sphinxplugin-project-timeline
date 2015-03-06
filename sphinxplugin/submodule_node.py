@@ -8,11 +8,12 @@ class SubmoduleNode(object):
     def __init__(self, tcs, fullid):
         parts = utils.split_name_and_submodule(fullid)
         self.name = parts[0]
-        self.timechunk = tcs[parts[0]]
+        self.timechunk = tcs.chunks[parts[0]]
         if len(parts) > 1:
             self.submodule = parts[1]
         else:
             self.submodule = 0
+        self.timechunk.submodules[self.submodule] = self
         self.children = []
         self.important = False
         self.group = None
@@ -83,26 +84,25 @@ class SubmoduleNode(object):
         return utils.id_from_name_and_submodule(
             self.timechunk.title, self.submodule)
 
-    def visit_dependency_resolution(self, timechunks, aliases, parents):
+    def visit_dependency_resolution(self, timechunks, parents):
         tc = self.timechunk
         for dep in tc.get_dependencies(self.submodule):
             try:
-                depname = utils.identify_time_chunk_name(
-                    dep, aliases, True, True)
+                depname = timechunks.get_chunk_id(dep, True, True)
                 for sn in depname:
                     if sn in parents:
                         # TODO: make this a parser error
                         raise ValueError(
                             "Cyclic dependency in graph!"
-                            "  {} depends on istself."
-                            .format(sn))
+                            "  {} depends on istself. {} -> {}"
+                            .format(sn, sn, ' -> '.join(parents)))
                     self.children.append(SubmoduleNode(timechunks, sn))
             except KeyError:
                 print "Could not resolve dependency {}".format(dep)
-        tc.submodules[self.submodule] = self
+        #        tc.submodules[self.submodule] = self
         for child in self.children:
             child.visit_dependency_resolution(
-                timechunks, aliases, parents + [self.get_full_id()])
+                timechunks, parents + [self.get_full_id()])
 
     def traverse_edge_lines(self, lines):
         fi = self.get_full_id(True)

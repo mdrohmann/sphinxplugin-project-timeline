@@ -26,21 +26,13 @@ def process_timelines(app, doctree, fromdocname):
         raise ValueError("no timeline chunks for the timeline found!")
 
     tcs = env.timeline_chunks
-    if not hasattr(env, 'timeline_groups'):
-        tgs = {}
-    else:
-        tgs = env.timeline_groups
+    tcs.update_aliases()
 
-    aliases = {}
-    for tc in tcs.values():
-        tc.update_aliases_with_backreference(aliases, tgs)
-
-#    import pudb
-#    pudb.set_trace()
-#
-    tn.resolve_all_dependencies(tcs, aliases)
-    lines, meta = tn.resolve_milestones(tcs, aliases)
-    lines += tn.resolve_deadlines(tcs, aliases)
+    tn.resolve_all_dependencies(tcs)
+    lines, meta = tn.resolve_milestones(tcs)
+    lines2, meta2 = tn.resolve_deadlines(tcs)
+    lines += lines2
+    meta += meta2
     nodes = set()
     for rc in tn.root_chunks:
         rc.traverse_edge_lines(lines)
@@ -49,6 +41,7 @@ def process_timelines(app, doctree, fromdocname):
     headers = [
         '              ',
         'Requested time',
+        'Percent done  ',
         'Spent work hrs',
         'Hours left I  ',
         'Hours left II ',
@@ -56,18 +49,19 @@ def process_timelines(app, doctree, fromdocname):
         'Work factor   ',
         'Advance / week',
         'ETA           ',
+        'ETA 2         ',
     ]
     widths = [16] * len(headers)
-    descriptions = utils.make_descriptions_from_meta(meta, 'Milestone')
+    descriptions1 = utils.make_descriptions_from_meta(meta, 'Milestone')
 
-    table = utils.description_table(descriptions, widths, headers)
+    table1 = utils.description_table(descriptions1, widths, headers)
 
-    lines = list(nodes) + lines
+    lines = ['orientation = portrait', ''] + list(nodes) + lines
 
     paragraph = docutils.nodes.paragraph()
     tn.blockdiag = sphinxcontrib.blockdiag.blockdiag_node()
     paragraph += tn.blockdiag
-    paragraph += table
+    paragraph += table1
     tn.blockdiag.code = (
         'blockdiag {{\n\t{}\n}}\n'.format('\n\t'.join(lines)))
     tn.blockdiag['code'] = tn.blockdiag.code

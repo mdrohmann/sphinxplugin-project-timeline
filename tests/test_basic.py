@@ -2,16 +2,22 @@
 
 import pytest
 import re
+import math
 from docutils import nodes
-from datetime import datetime
+from datetime import datetime, timedelta
 from sphinx_testing import with_app
-from sphinxplugin.timeline_chunk import TimelineChunk
+from sphinxplugin.timeline_chunk import (
+    TimelineChunk, TimelineChunksContainer)
 from sphinxplugin.nodes import TimelineNode
+from sphinxplugin.submodule_node import SubmoduleNode
 from sphinxplugin.utils import (
-    parse_list_items,
-    split_name_and_submodule, identify_time_chunk_name,
+    parse_list_items, add_stats, make_descriptions_from_meta,
+    split_name_and_submodule,
     parse_time_delta)
 
+
+from collections import namedtuple
+MockParent = namedtuple('parent', ['attributes'])
 
 with_svg_app = with_app(
     srcdir='tests/docs/complete',
@@ -26,7 +32,6 @@ with_svg_app = with_app(
 def test_build_html(app, status, warning):
     app.builder.build_all()
     source = (app.outdir / 'index.html').read_text(encoding='utf-8')
-    print source
     # assert re.match('<div><img .*? src=".*?.png" .*?/></div>', source)
 
 
@@ -37,10 +42,73 @@ def test_split_names():
     assert res == ['test 1']
 
 
-def test_parse_list_items():
+@pytest.fixture(params=[nodes.enumerated_list, nodes.bullet_list])
+def get_list(request):
     p = nodes.paragraph()
+    el = request.param()
+    return p, el
+
+
+def test_parse_worked_on():
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = '2015-01-01:  2hrs 90%'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.completeness[0] == 0.9
+    assert tc.start_times[0] == datetime(2015, 1, 1)
+    assert tc.worked_minutes[0] == 120
+
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = '15/01/01: 2hrs 30min 90%'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.completeness[0] == 0.9
+    assert tc.start_times[0] == datetime(2001, 1, 15)
+    assert tc.worked_minutes[0] == 150
+
+    line = '05/01/01: 30min 90%'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.completeness[0] == 0.9
+    assert tc.start_times[0] == datetime(2001, 5, 1)
+    assert tc.worked_minutes[0] == 180
+
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = 'May 2nd, 2015:30min 90%'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.completeness[0] == 0.9
+    assert tc.start_times[0] == datetime(2015, 5, 2)
+    assert tc.worked_minutes[0] == 30
+
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = '30min 90%'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.completeness[0] == 0.9
+    assert abs(tc.get_start_time(0) - datetime.now()).days == 0
+    assert tc.worked_minutes[0] == 30
+
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = '1/1/01: 90%'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.completeness[0] == 0.9
+    assert tc.get_start_time(0) == datetime(2001, 1, 1)
+    assert tc.get_worked_minutes(0) == 0
+
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = '1/1/01: 1.5hrs'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.get_completeness(0) == 0.
+    assert tc.get_start_time(0) == datetime(2001, 1, 1)
+    assert tc.get_worked_minutes(0) == 90
+
+    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+    line = '1/1/01'
+    tc._parse_worked_on_line(line, 0)
+    assert tc.get_completeness(0) == 0.
+    assert tc.get_start_time(0) == datetime(2001, 1, 1)
+    assert tc.get_worked_minutes(0) == 0
+
+
+def test_parse_list_items(get_list):
+    p, el = get_list
     assert parse_list_items(p) == []
-    el = nodes.enumerated_list()
     p.append(el)
     item1 = nodes.list_item()
     paragraph1 = nodes.paragraph()
@@ -71,16 +139,19 @@ def test_identify_time_chunk_name():
         'non-unique': [('test', 2), ('other', 1)]
     }
 
-    assert identify_time_chunk_name('test (I)', aliases) == [('test', 0)]
-    assert identify_time_chunk_name(
-        'test (I)', aliases, False, True) == [('test (I)')]
-    assert identify_time_chunk_name('test (II)', aliases) == [('test', 1)]
-    assert identify_time_chunk_name('test', aliases) == [('test', 0)]
+    tcc = TimelineChunksContainer()
+    tcc.aliases = aliases
+
+    assert tcc.get_chunk_id('test (I)') == [('test', 0)]
+    assert tcc.get_chunk_id(
+        'test (I)', False, True) == [('test (I)')]
+    assert tcc.get_chunk_id('test (II)') == [('test', 1)]
+    assert tcc.get_chunk_id('test') == [('test', 0)]
     assert (
-        identify_time_chunk_name('test', aliases, True)
+        tcc.get_chunk_id('test', True)
         == [('test', 0), ('test', 1)])
     with pytest.raises(ValueError):
-        identify_time_chunk_name('non-unique', aliases)
+        tcc.get_chunk_id('non-unique')
 
 
 def test_TimelineNode():
@@ -116,43 +187,70 @@ def test_time_delta():
 
 
 def compute_aliases(tcs):
-    aliases = {}
-    for tc in tcs.values():
-        tc.update_aliases_with_backreference(aliases, {})
-    return aliases
+    tcs.aliases = {}
+    tcs.update_aliases()
 
 
 @pytest.fixture
 def mock_tcs():
-    from collections import namedtuple
-    MockParent = namedtuple('parent', ['attributes'])
     p1 = MockParent({'ids': ['test1']})
     p2 = MockParent({'ids': ['test2']})
-    tcs = {
+    tcs = TimelineChunksContainer()
+    tcs.chunks = {
         'test1': TimelineChunk(p1, 'test1', 'test1'),
-        'test2': TimelineChunk(p2, 'Test 2', 'test2')}
-    tc1 = tcs['test1']
-    tc2 = tcs['test2']
-    tc1.time_deltas = [1]
-    tc2.time_deltas = [1]
-    tc1.dependencies = {0: ['test2']}
+        'test-2': TimelineChunk(p2, 'Test 2', 'test2')}
+    tc1 = tcs.chunks['test1']
+    tc2 = tcs.chunks['test-2']
+    tc1.time_deltas = [60]
+    tc2.time_deltas = [60]
+    tc1.dependencies = {0: ['test-2']}
+
+    tc1.worked_minutes = {0: 30}
+    tc2.worked_minutes = {0: 60}
+    tc1.completeness = {0: 0.5}
+    tc2.completeness = {0: 0.5}
+    tc1.start_times = {
+        0: datetime.now() - timedelta(7, 0, 0)}
 
     return tcs
+
+
+def test_work_stats(mock_tcs):
+    tcs = mock_tcs
+    sn1 = SubmoduleNode(tcs, 'test1 (I)')
+    sn1.children.append(SubmoduleNode(tcs, 'test-2 (I)'))
+    stats = {}
+    sn1.compute_work_stats(stats)
+    res = add_stats(stats)
+    assert res['time_req'] == 120
+    assert res['minutes_worked'] == 90
+    assert res['done'] == 0.5
+    assert math.floor(res['time_worked']) == 7
+
+    rows = make_descriptions_from_meta([res], 'Milestone')
+    fmt = '%Y-%m-%d'
+    eta1 = (datetime.now() + timedelta(7)).strftime(fmt)
+    eta2 = (datetime.now() + timedelta(int(7/1.5))).strftime(fmt)
+    assert rows == [
+        ['Milestone 1', '2.00 h', '50.0 %',
+         '1.50 h', '0.50 h', '1.50 h', '7.00 d', '1.50',
+         '50 %', eta1, eta2
+         ]]
 
 
 def test_resolve_all_dependencies(mock_tcs):
 
     tcs = mock_tcs
 
-    aliases = compute_aliases(tcs)
+    compute_aliases(tcs)
 
     tn = TimelineNode()
-    tn.resolve_all_dependencies(tcs, aliases)
+    tn.resolve_all_dependencies(tcs)
 
     root_chunks = tn.root_chunks
     assert len(root_chunks) == 1
     assert root_chunks[0].get_full_id() == 'test1 (I)'
-    assert root_chunks[0].children[0].get_full_id() == 'test2 (I)'
+    assert root_chunks[0].children[0].get_full_id() == 'test-2 (I)'
 
 
 @pytest.fixture
@@ -160,45 +258,45 @@ def test_resolve_all_dependencies_2(mock_tcs):
 
     tcs = mock_tcs
 
-    tc1 = tcs['test1']
+    tc1 = tcs.chunks['test1']
     tc1.time_deltas = [1, 1]
 
-    aliases = compute_aliases(tcs)
+    compute_aliases(tcs)
 
     tn = TimelineNode()
-    tn.resolve_all_dependencies(tcs, aliases)
+    tn.resolve_all_dependencies(tcs)
 
     root_chunks = tn.root_chunks
     assert len(root_chunks) == 2
     assert root_chunks[0].get_full_id() == 'test1 (I)'
     assert root_chunks[1].get_full_id() == 'test1 (II)'
     assert len(root_chunks[1].children) == 0
-    assert root_chunks[0].children[0].get_full_id() == 'test2 (I)'
+    assert root_chunks[0].children[0].get_full_id() == 'test-2 (I)'
 
     return tcs, tn
 
 
 def test_blockdiag_edges(test_resolve_all_dependencies_2):
     tcs, tn = test_resolve_all_dependencies_2
-    tc1 = tcs['test1']
+    tc1 = tcs.chunks['test1']
     sn1 = tc1.get_submodule(0)
     lines = []
     sn1.traverse_edge_lines(lines)
 
     assert len(lines) == 1
-    assert lines[0] == 'test2-I -> test1-I'
+    assert lines[0] == 'test-2-I -> test1-I'
 
 
 def test_blockdiag_edges_2(test_resolve_all_dependencies_2):
     tcs, tn = test_resolve_all_dependencies_2
-    tc1 = tcs['test1']
+    tc1 = tcs.chunks['test1']
     sn1 = tc1.get_submodule(0)
     sn1.important = True
     lines = []
     sn1.traverse_edge_lines(lines)
 
     assert len(lines) == 1
-    assert lines[0] == 'test2-I -> test1-I [color = "red"]'
+    assert lines[0] == 'test-2-I -> test1-I [color = "red"]'
 
 
 def test_blockdiag_nodes(test_resolve_all_dependencies_2):
@@ -209,7 +307,7 @@ def test_blockdiag_nodes(test_resolve_all_dependencies_2):
 
     assert len(nodes) == 3
     assert 'test1-I [label = "test1 (I)", href = ":ref:`test1`"]' in nodes
-    assert 'test2-I [label = "Test 2 (I)", href = ":ref:`test2`"]' in nodes
+    assert 'test-2-I [label = "Test 2 (I)", href = ":ref:`test2`"]' in nodes
 
 
 def test_blockdiag_nodes_2(test_resolve_all_dependencies_2):
@@ -227,53 +325,55 @@ def test_blockdiag_nodes_2(test_resolve_all_dependencies_2):
         '[group = "Milestone1", linecolor = "red", label = "test1 (I)",'
         ' href = ":ref:`test1`"]'
         in nodes)
-    assert 'test2-I [label = "Test 2 (I)", href = ":ref:`test2`"]' in nodes
+    assert 'test-2-I [label = "Test 2 (I)", href = ":ref:`test2`"]' in nodes
 
 
 def test_resolve_all_dependencies_3(mock_tcs):
 
     tcs = mock_tcs
-    tc2 = tcs['test2']
+    tc2 = tcs.chunks['test-2']
     tc2.time_deltas = [1, 1]
 
-    aliases = compute_aliases(tcs)
+    compute_aliases(tcs)
 
     tn = TimelineNode()
-    tn.resolve_all_dependencies(tcs, aliases)
+    tn.resolve_all_dependencies(tcs)
 
     root_chunks = tn.root_chunks
     assert len(root_chunks) == 1
     assert root_chunks[0].get_full_id() == 'test1 (I)'
-    assert root_chunks[0].children[0].get_full_id() == 'test2 (I)'
-    assert root_chunks[0].children[1].get_full_id() == 'test2 (II)'
+    assert root_chunks[0].children[0].get_full_id() == 'test-2 (I)'
+    assert root_chunks[0].children[1].get_full_id() == 'test-2 (II)'
 
 
 def test_resolve_all_dependencies_4(mock_tcs):
 
     tcs = mock_tcs
-    tc2 = tcs['test2']
+    tc2 = tcs.chunks['test-2']
     tc2.dependencies = {0: ['test1']}
 
-    aliases = compute_aliases(tcs)
+    compute_aliases(tcs)
 
     tn = TimelineNode()
     with pytest.raises(ValueError):
-        tn.resolve_all_dependencies(tcs, aliases)
+        tn.resolve_all_dependencies(tcs)
 
 
 def test_resolve_all_dependencies_5(mock_tcs):
 
     tcs = mock_tcs
-    tc1 = tcs['test1']
+    tc1 = tcs.chunks['test1']
     tc1.time_deltas = [1, 1]
-    tc2 = tcs['test2']
+    tc2 = tcs.chunks['test-2']
     tc2.dependencies = {0: ['test1 (I)']}
 
-    aliases = compute_aliases(tcs)
+    compute_aliases(tcs)
 
     tn = TimelineNode()
-    tn.resolve_all_dependencies(tcs, aliases)
+    tn.resolve_all_dependencies(tcs)
     with pytest.raises(ValueError):
+        tc1.container = tcs
+        tc2.container = tcs
         tc1.get_submodule(0)
 
 

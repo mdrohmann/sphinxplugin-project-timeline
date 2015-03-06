@@ -1,14 +1,109 @@
 import re
+import docutils
 from datetime import datetime
 import dateutil.parser
 import roman
 from . import utils
+from .submodule_node import SubmoduleNode
+
+
+class TimelineChunksContainer(object):
+
+    def __init__(self):
+
+        self.chunks = {}
+        self.aliases = {}
+        self.groups = {}
+
+    def purge(self, docname):
+        self.chunks = dict(
+            [(key, chunk) for (key, chunk) in self.chunks.iteritems()
+             if chunk.docname != docname])
+        self.groups = dict(
+            [(key, group) for (key, group) in self.groups.iteritems()
+             if group.docname != docname])
+
+        self.aliases = {}
+        self.update_aliases(self.aliases, self.groups)
+
+    def get_chunk_id(self, name, allow_groups=False, submodule_ids=False):
+        parts = utils.split_name_and_submodule(name)
+        # TODO: use pending_xrefs to resolve the links
+        try:
+            possible_alias = list(self.aliases[parts[0].lower()])
+        except KeyError:
+            possible_alias = list(self.aliases[utils.slugify(parts[0])])
+
+        if not allow_groups and len(possible_alias) > 1:
+            # TODO: add a parser warning
+            raise ValueError(
+                "TimelineChunk with non-unique identifier {name} requested!"
+                .format(name=name))
+
+        ret = []
+        for pa in possible_alias:
+            name = pa[0]
+        #    nsms = possible_alias[0][1]
+
+            submodules = None
+            if len(parts) == 2:
+                submodules = parts[1:]
+            else:
+                if allow_groups:
+                    submodules = range(pa[1])
+                else:
+                    submodules = [0]
+
+            ret_t = [(name, sm) for sm in submodules]
+            if submodule_ids:
+                ret_t = [
+                    utils.id_from_name_and_submodule(x[0], x[1])
+                    for x in ret_t]
+            ret += ret_t
+        return ret  # , nsms
+
+    def add_chunk(self, parent, docname):
+        parent_name = parent.attributes['ids']
+        if not isinstance(parent, docutils.nodes.section):
+            # TODO: make this an error in the parser
+            raise ValueError('parent of timeline chunk is not a section!')
+        if len(parent_name) == 0:
+            # TODO: make this a warning or error in the parser
+            raise ValueError('no id name for timeline chunk.')
+        elif len(parent_name) > 1:
+            # TODO: add a warning that the timeline chunk is not unique
+            raise ValueError('timeline chunk is not unique.')
+
+        parent_name = parent_name[0]
+
+        title = (
+            ' '.join([t.astext() for t in (parent
+                     .traverse(docutils.nodes.title)[0]
+                     .traverse(docutils.nodes.Text))]))
+
+        if utils.slugify(title) not in self.chunks:
+            self.chunks[utils.slugify(title)] = TimelineChunk(
+                parent, title, parent_name, docname, self)
+
+        return self.chunks[utils.slugify(title)]
+
+    def add_group(self, name, parent, docname):
+        self.groups[name] = {
+            'parent': parent,
+            'docname': docname
+        }
+
+    def update_aliases(self):
+        for tc in self.chunks.values():
+            tc.update_aliases_with_backreference(self.aliases, self.groups)
 
 
 class TimelineChunk(object):
 
     def __init__(self, parent,
-                 title='unknown', name='unknown', docname='unknown'):
+                 title='unknown', name='unknown', docname='unknown',
+                 container=None):
+        self.container = container
         self.parent = parent
         self.title = title
         self.name = name
@@ -48,7 +143,7 @@ class TimelineChunk(object):
 
     def get_completeness(self, num):
         if num in self.completeness:
-            return self.get_completeness[num]
+            return self.completeness[num]
         else:
             return 0
 
@@ -60,14 +155,15 @@ class TimelineChunk(object):
         if num in self.submodules:
             return self.submodules[num]
         else:
-            raise ValueError(
-                'Submodule {} in {} does not exist.'
-                'Do you have cyclic dependencies?'
-                .format(num, self.name))
+            sm = SubmoduleNode(
+                self.container,
+                utils.id_from_name_and_submodule(
+                    utils.slugify(self.title), num))
+            sm.visit_dependency_resolution(self.container, [])
+            return sm
 
     def _parse_worked_on_line(self, line, submodule):
-        res = {'date': None, 'minutes': 0, 'done': 0}
-        parts = re.split(r' +', line, 2)
+        parts = re.split(r':', line, 2)
         lindex = 0
         try:
             time = dateutil.parser.parse(parts[0])
@@ -76,12 +172,19 @@ class TimelineChunk(object):
         except:
             pass
 
-        nline = ' '.join(parts[lindex:])
+        nline = ':'.join(parts[lindex:])
         res = re.search(r'([\d\.]+) *%', nline)
         if res:
             nline = nline[0:res.start()]
-            self.completeness[submodule] = float(res.group())
-        self.worked_minutes[submodule] = utils.parse_time_delta(nline)
+            self.completeness[submodule] = float(res.groups()[0])/100.
+        try:
+            time_delta = utils.parse_time_delta(nline)
+            if submodule in self.worked_minutes:
+                self.worked_minutes[submodule] += time_delta
+            else:
+                self.worked_minutes[submodule] = time_delta
+        except ValueError:
+            pass
 
     def _parse_worked_strings(self, worked_strings, submodule):
         for ws in worked_strings:
@@ -89,10 +192,7 @@ class TimelineChunk(object):
 
     def parse_worked_on(self, text_or_node, submodule):
 
-        if len(submodule) == 0:
-            submodule = 0
-        else:
-            submodule = roman.fromRoman(submodule[0]) - 1
+        submodule = roman.fromRoman(submodule) - 1
 
         worked_strings = []
         if isinstance(text_or_node, basestring):
@@ -106,10 +206,7 @@ class TimelineChunk(object):
 
     def parse_dependencies(self, text_or_node, submodule):
 
-        if len(submodule) == 0:
-            submodule = 0
-        else:
-            submodule = roman.fromRoman(submodule[0]) - 1
+        submodule = roman.fromRoman(submodule) - 1
 
         dep_strings = []
         if isinstance(text_or_node, basestring):
@@ -137,8 +234,8 @@ class TimelineChunk(object):
             for time_string in time_strings]
 
     def update_aliases_with_backreference(self, aliases, groups):
-        arg = (self.name, self.num_submodules())
-        for cid in [self.title] + self.parent.attributes['ids']:
+        arg = (utils.slugify(self.title), self.num_submodules())
+        for cid in [utils.slugify(self.title)] + self.parent.attributes['ids']:
             if cid in aliases.keys():
                 aliases[cid.lower()].add(arg)
             else:
