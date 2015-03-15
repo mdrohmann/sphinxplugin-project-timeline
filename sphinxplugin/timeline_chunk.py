@@ -24,7 +24,7 @@ class TimelineChunksContainer(object):
              if group.docname != docname])
 
         self.aliases = {}
-        self.update_aliases(self.aliases, self.groups)
+        self.update_aliases()
 
     def get_chunk_id(self, name, allow_groups=False, submodule_ids=False):
         parts = utils.split_name_and_submodule(name)

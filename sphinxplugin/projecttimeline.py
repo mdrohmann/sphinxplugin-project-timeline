@@ -13,7 +13,7 @@ def purge_timelines(app, env, docname):
     if not hasattr(env, 'timeline_chunks'):
         return
 
-    env.timeline_chunks.purge_docname()
+    env.timeline_chunks.purge(docname)
 
 
 def task_group_role(name, rawtext, text, lineno, inliner,
@@ -53,9 +53,9 @@ def setup(app):
         lambda *args: TimelineDependencyDirective.role(*args))
     app.add_directive('dependent-tasks', TimelineDependencyDirective)
     app.add_directive('timeline', TimelineDirective)
-    app.add_directive('env-purge-doc', purge_timelines)
     app.connect('doctree-resolved', process_timelines)
     app.connect('builder-inited', on_builder_inited)
+    app.connect('env-purge-doc', purge_timelines)
 
     # TODO:
     # - [ ] add javascript source code in order to manipulate the progress
