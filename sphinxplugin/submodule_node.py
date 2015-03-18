@@ -88,7 +88,6 @@ class SubmoduleNode(object):
 
     def visit_dependency_resolution(self, timechunks, parents):
         tc = self.timechunk
-        self.compute_work_stats({})
         for dep in tc.get_dependencies(self.submodule):
             try:
                 depname = timechunks.get_chunk_id(dep, True, True)

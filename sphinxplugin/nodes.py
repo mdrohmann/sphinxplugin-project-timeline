@@ -108,6 +108,10 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
             submodule.set_important()
             submodule.group = 'Milestone{}'.format(mn)
 
+    def resolve_all_stats(self, timechunks):
+        for rc in self.root_chunks:
+            rc.compute_work_stats({})
+
     def resolve_milestones(self, timechunks):
         grouplines = []
         stats = []

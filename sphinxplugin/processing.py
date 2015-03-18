@@ -34,6 +34,7 @@ def process_timelines(app, doctree, fromdocname):
     lines2, meta2 = tn.resolve_deadlines(tcs)
     lines += lines2
     meta += meta2
+    tn.resolve_all_stats(tcs)
 
     tnsns = doctree.traverse(TaskTableSummaryNode)
     for tnsn in tnsns:
