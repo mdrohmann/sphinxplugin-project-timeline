@@ -117,6 +117,7 @@ class TimelineChunk(object):
         self.submodules = {}
         self.worked_minutes = {}
         self.start_times = {}
+        self.end_times = {}
         self.completeness = {}
         self.stats = {}
 
@@ -168,16 +169,37 @@ class TimelineChunk(object):
         else:
             return datetime.now()
 
+    def set_start_time(self, num, time):
+        if num in self.start_times:
+            self.start_times[num] = min(self.start_times[num], time)
+        else:
+            self.start_times[num] = time
+
+    def get_end_time(self, num):
+        if num in self.end_times:
+            return self.end_times[num]
+        else:
+            return datetime.now()
+
     def get_worked_time(self, num):
         st = self.get_start_time(num)
-        now = datetime.now()
-        return utils.dt_to_float_days(now - st)
+
+        end = self.get_end_time(num)
+        return utils.dt_to_float_days(end - st)
 
     def get_completeness(self, num):
         if num in self.completeness:
             return self.completeness[num]
         else:
             return 0
+
+    def set_completeness(self, num, prc_done, time):
+        self.completeness[num] = prc_done
+        if prc_done == 1:
+            if time is None:
+                self.end_times[num] = datetime.now()
+            else:
+                self.end_times[num] = time
 
     def num_submodules(self):
 #        assert len(self.time_deltas) > max(self.dependencies.keys())
@@ -197,9 +219,10 @@ class TimelineChunk(object):
     def _parse_worked_on_line(self, line, submodule):
         parts = re.split(r':', line, 2)
         lindex = 0
+        time = None
         try:
             time = dateutil.parser.parse(parts[0])
-            self.start_times[submodule] = time
+            self.set_start_time(submodule, time)
             lindex = 1
         except:
             pass
@@ -208,7 +231,7 @@ class TimelineChunk(object):
         res = re.search(r'([\d\.]+) *%', nline)
         if res:
             nline = nline[0:res.start()]
-            self.completeness[submodule] = float(res.groups()[0])/100.
+            self.set_completeness(submodule, float(res.groups()[0])/100., time)
         try:
             time_delta = utils.parse_time_delta(nline)
             if submodule in self.worked_minutes:

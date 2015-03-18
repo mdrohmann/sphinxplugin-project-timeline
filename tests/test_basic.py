@@ -51,15 +51,22 @@ def get_list(request):
     return p, el
 
 
-def test_parse_worked_on():
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+@pytest.fixture()
+def tc_worked_on():
+    return TimelineChunk(MockParent({'ids': ['test1']}))
+
+
+def test_parse_worked_on_1(tc_worked_on):
+    tc = tc_worked_on
     line = '2015-01-01:  2hrs 90%'
     tc._parse_worked_on_line(line, 0)
     assert tc.completeness[0] == 0.9
     assert tc.start_times[0] == datetime(2015, 1, 1)
     assert tc.worked_minutes[0] == 120
 
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+
+def test_parse_worked_on_2(tc_worked_on):
+    tc = tc_worked_on
     line = '15/01/01: 2hrs 30min 90%'
     tc._parse_worked_on_line(line, 0)
     assert tc.completeness[0] == 0.9
@@ -69,38 +76,48 @@ def test_parse_worked_on():
     line = '05/01/01: 30min 90%'
     tc._parse_worked_on_line(line, 0)
     assert tc.completeness[0] == 0.9
-    assert tc.start_times[0] == datetime(2001, 5, 1)
+    assert tc.start_times[0] == datetime(2001, 1, 15)
     assert tc.worked_minutes[0] == 180
 
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+
+def test_parse_worked_on_3(tc_worked_on):
+    tc = tc_worked_on
     line = 'May 2nd, 2015:30min 90%'
     tc._parse_worked_on_line(line, 0)
     assert tc.completeness[0] == 0.9
     assert tc.start_times[0] == datetime(2015, 5, 2)
     assert tc.worked_minutes[0] == 30
 
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+
+def test_parse_worked_on_4(tc_worked_on):
+    tc = tc_worked_on
     line = '30min 90%'
     tc._parse_worked_on_line(line, 0)
     assert tc.completeness[0] == 0.9
     assert abs(tc.get_start_time(0) - datetime.now()).days == 0
     assert tc.worked_minutes[0] == 30
 
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+
+def test_parse_worked_on_5(tc_worked_on):
+    tc = tc_worked_on
     line = '1/1/01: 90%'
     tc._parse_worked_on_line(line, 0)
     assert tc.completeness[0] == 0.9
     assert tc.get_start_time(0) == datetime(2001, 1, 1)
     assert tc.get_worked_minutes(0) == 0
 
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+
+def test_parse_worked_on_6(tc_worked_on):
+    tc = tc_worked_on
     line = '1/1/01: 1.5hrs'
     tc._parse_worked_on_line(line, 0)
     assert tc.get_completeness(0) == 0.
     assert tc.get_start_time(0) == datetime(2001, 1, 1)
     assert tc.get_worked_minutes(0) == 90
 
-    tc = TimelineChunk(MockParent({'ids': ['test1']}))
+
+def test_parse_worked_on_7(tc_worked_on):
+    tc = tc_worked_on
     line = '1/1/01'
     tc._parse_worked_on_line(line, 0)
     assert tc.get_completeness(0) == 0.
