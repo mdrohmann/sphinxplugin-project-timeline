@@ -1,5 +1,6 @@
 from .timeline_chunk import TimelineChunksContainer
-from .nodes import (TimelineBlockdiagNode, TimelineNode)
+from .nodes import (
+    TaskTableSummaryNode, TimelineBlockdiagNode, TimelineNode)
 from .directives import (
     TimelineWorkedOnDirective, TimelineRequestedDirective,
     TimelineDependencyDirective, TimelineDirective)
@@ -37,6 +38,7 @@ def on_builder_inited(self):
 
 def setup(app):
 
+    app.add_node(TaskTableSummaryNode)
     app.add_node(TimelineBlockdiagNode)
     app.add_node(TimelineNode)
     app.add_role('task-group', task_group_role)

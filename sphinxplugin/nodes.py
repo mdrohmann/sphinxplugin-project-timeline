@@ -17,6 +17,16 @@ class TimelineBlockdiagNode(sphinxcontrib.blockdiag.blockdiag_node):
     pass
 
 
+class TaskTableSummaryNode(docutils.nodes.General, docutils.nodes.Element):
+
+    def set_chunk(self, title):
+        self.attributes['slug'] = utils.slugify(title)
+
+    def add_stat_table(self, tcs):
+        chunk = tcs.chunks[self.attributes['slug']]
+        chunk.add_stat_tables(self)
+
+
 class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
     """
     This node simply is a wrapper creating a TimelineBlockdiag element with a

@@ -1,7 +1,7 @@
 import docutils
 import sphinxcontrib.blockdiag
 
-from .nodes import TimelineNode
+from .nodes import TimelineNode, TaskTableSummaryNode
 from . import utils
 
 
@@ -29,10 +29,16 @@ def process_timelines(app, doctree, fromdocname):
     tcs.update_aliases()
 
     tn.resolve_all_dependencies(tcs)
+
     lines, meta = tn.resolve_milestones(tcs)
     lines2, meta2 = tn.resolve_deadlines(tcs)
     lines += lines2
     meta += meta2
+
+    tnsns = doctree.traverse(TaskTableSummaryNode)
+    for tnsn in tnsns:
+        tnsn.add_stat_table(tcs)
+
     nodes = set()
     for rc in tn.root_chunks:
         rc.traverse_edge_lines(lines)

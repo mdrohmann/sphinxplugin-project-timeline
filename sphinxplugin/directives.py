@@ -2,7 +2,7 @@ import re
 import docutils.parsers
 from sphinx.util.nodes import nested_parse_with_titles
 from .timeline_chunk import TimelineChunksContainer
-from .nodes import TimelineNode
+from .nodes import TimelineNode, TaskTableSummaryNode
 from . import utils
 
 
@@ -73,7 +73,10 @@ class TimelineRequestedDirective(TimelineChunksDirective):
 
         chunk.parse_requested_time(nested_node)
 
-        return []
+        ttsn = TaskTableSummaryNode()
+        ttsn.set_chunk(chunk.title)
+
+        return [ttsn]
 
     @classmethod
     def role(cls, name, rawtext, text, lineno, inliner,
@@ -81,7 +84,11 @@ class TimelineRequestedDirective(TimelineChunksDirective):
         chunk = cls.get_chunk_for_node(inliner.document, inliner)
 
         chunk.parse_requested_time(text)
-        return [], []
+
+        ttsn = TaskTableSummaryNode()
+        ttsn.set_chunk(chunk.title)
+
+        return [ttsn], []
 
 
 class TimelineDependencyDirective(TimelineChunksDirective):

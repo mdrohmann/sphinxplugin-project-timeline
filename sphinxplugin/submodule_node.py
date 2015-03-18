@@ -47,6 +47,8 @@ class SubmoduleNode(object):
                 'done': complete,
             }
 
+            self.timechunk.add_stats(self.submodule, self.stats)
+
             total_stats = {
                 'start_time': datetime.now(), 'time_req': {},
                 'minutes_worked': {}, 'done': {}

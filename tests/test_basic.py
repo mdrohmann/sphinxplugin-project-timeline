@@ -32,6 +32,8 @@ with_svg_app = with_app(
 def test_build_html(app, status, warning):
     app.builder.build_all()
     source = (app.outdir / 'index.html').read_text(encoding='utf-8')
+    import pudb
+    pudb.set_trace()
     # assert re.match('<div><img .*? src=".*?.png" .*?/></div>', source)
 
 
@@ -377,6 +379,8 @@ def test_resolve_all_dependencies_5(mock_tcs):
         tc1.get_submodule(0)
 
 
+def test_stat_tables(mock_tcs):
+    pass
 
 
 

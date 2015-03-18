@@ -97,6 +97,10 @@ class TimelineChunksContainer(object):
         for tc in self.chunks.values():
             tc.update_aliases_with_backreference(self.aliases, self.groups)
 
+    def add_stat_tables(self):
+        for tc in self.chunks.values():
+            tc.add_stat_tables()
+
 
 class TimelineChunk(object):
 
@@ -114,12 +118,40 @@ class TimelineChunk(object):
         self.worked_minutes = {}
         self.start_times = {}
         self.completeness = {}
+        self.stats = {}
+
+    def add_stat_tables(self, ttsn):
+
+        headers = [
+            '              ',
+            'Requested time',
+            'Percent done  ',
+            'Spent work hrs',
+            'Hours left I  ',
+            'Hours left II ',
+            'Spent days    ',
+            'Work factor   ',
+            'Advance / week',
+            'ETA           ',
+            'ETA 2         ',
+            ]
+        widths = [16] * len(headers)
+        meta = [self.stats[key] for key in sorted(self.stats.keys())]
+        descriptions1 = utils.make_descriptions_from_meta(meta, 'Task')
+
+        paragraph = docutils.nodes.paragraph()
+        table = utils.description_table(descriptions1, widths, headers)
+        paragraph += table
+        ttsn.replace_self(paragraph)
 
     def get_dependencies(self, num):
         if num in self.dependencies:
             return self.dependencies[num]
         else:
             return []
+
+    def add_stats(self, submodule, stats):
+        self.stats[submodule] = stats
 
     def get_requested_time(self, num):
         return self.time_deltas[num]
