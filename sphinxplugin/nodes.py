@@ -104,7 +104,7 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
         submodules = ms['submodules'] or range(ms_chunk.num_submodules())
         for sm in submodules:
             submodule = ms_chunk.get_submodule(sm)
-            stats = submodule.compute_work_stats(stats)
+            submodule.compute_work_stats(stats)
             submodule.set_important()
             submodule.group = 'Milestone{}'.format(mn)
 
@@ -134,7 +134,7 @@ class TimelineNode(docutils.nodes.General, docutils.nodes.Element):
         submodules = dl['submodules'] or range(dl_chunk.num_submodules())
         for sm in submodules:
             submodule = dl_chunk.get_submodule(sm)
-            stats = submodule.compute_work_stats(stats)
+            submodule.compute_work_stats(stats)
             submodule.group = 'Deadline{}'.format(dn)
 
     def resolve_deadlines(self, timechunks):
