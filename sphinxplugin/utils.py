@@ -58,10 +58,16 @@ def make_descriptions_from_meta(meta, name):
             ETA = 'undefined'
             ETA2 = 'undefined'
         else:
-            r_ETA1 = datetime.now() + timedelta(int(r_ETA))
-            r_ETA2 = datetime.now() + timedelta(int(r_ETA/r_factor))
-            ETA = '{}'.format(r_ETA1.strftime('%Y-%m-%d'))
-            ETA2 = '{}'.format(r_ETA2.strftime('%Y-%m-%d'))
+            try:
+                r_ETA1 = datetime.now() + timedelta(int(r_ETA))
+                ETA = '{}'.format(r_ETA1.strftime('%Y-%m-%d'))
+            except:
+                ETA = 'undefined'
+            try:
+                r_ETA2 = datetime.now() + timedelta(int(r_ETA/r_factor))
+                ETA2 = '{}'.format(r_ETA2.strftime('%Y-%m-%d'))
+            except:
+                ETA2 = 'undefined'
         rows.append([
             nam, req_time, prc_done, hrs_spent, hrs_left1, hrs_left2,
             days_spent, work_factor, advancement_week, ETA, ETA2
