@@ -8,7 +8,7 @@ requires = [
     'setuptools', 'python-dateutil', 'roman', 'docutils']
 
 setup(
-    name='sphinxcontrib-blockdiag',
+    name='sphinxplugin-project-timeline',
     version='0.1.0',
     #    url='',
     #    download_url='',
