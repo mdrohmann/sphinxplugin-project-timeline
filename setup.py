@@ -4,8 +4,8 @@ from setuptools import setup, find_packages
 
 
 requires = [
-    'sphinxcontrib-blockdiag', 'blockdiag>=1.5.0', 'Sphinx>=0.6', 'setuptools',
-    'python-dateutil', 'roman', 'docutils']
+    'sphinxcontrib-blockdiag>=1.5.0', 'blockdiag>=1.5.0', 'Sphinx>=0.6',
+    'setuptools', 'python-dateutil', 'roman', 'docutils']
 
 setup(
     name='sphinxcontrib-blockdiag',
