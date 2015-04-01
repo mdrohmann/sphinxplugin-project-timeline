@@ -13,10 +13,14 @@ Installation
 
 1. Clone this repository in a local directory with
 
+   .. code:: bash
+
      git clone git@github.com:mdrohmann/sphinxplugin-project-timeline.git
 
 2. Install the plugin (This should install all dependencies in your python
    installation automatically)
+
+   .. code:: bash
 
      python setup.py install
 
@@ -52,13 +56,19 @@ Usage
 
 4. Overwrite the index.rst file with my template for the project timeline.
 
+   .. code:: bash
+
      cp /path/to/plugin_repository/tests/docs/complete/index.rst .
 
 5. Create the website with
 
+   .. code:: bash
+
      make html
 
    and open it in your webbrowser
+
+   .. code:: bash
 
      firefox _build/html/index.html
 
