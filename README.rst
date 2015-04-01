@@ -30,6 +30,8 @@ Configuration
 1. Create a new directory, say 'myprojectdir'.
 2. Change into this directory and run
 
+   .. code:: bash
+
      sphinx-quickstart
 
    and answer all the questions.  You can select the defaults if you are
