@@ -85,4 +85,4 @@ update, the website you have to re-do step 5 and update your browser.
   automatically re-builds the website.
 
 .. _Sphinx: http://sphinx-doc.org/
-.. _watchdoc: https://pythonhosted.org/watchdog/quickstart.html#a-simple-example
+.. _watchdog: https://pythonhosted.org/watchdog/quickstart.html#a-simple-example
