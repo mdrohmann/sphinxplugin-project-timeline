@@ -32,8 +32,8 @@ with_svg_app = with_app(
 def test_build_html(app, status, warning):
     app.builder.build_all()
     source = (app.outdir / 'index.html').read_text(encoding='utf-8')
-    import pudb
-    pudb.set_trace()
+#    import pudb
+#    pudb.set_trace()
     # assert re.match('<div><img .*? src=".*?.png" .*?/></div>', source)
 
 
