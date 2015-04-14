@@ -80,7 +80,7 @@ update, the website you have to re-do step 5 and update your browser.
 
 .. tip::
 
-  If you do not want to remake the website manually, you can add a watchdog_
+  If you do not want to remake the website manually, you can add a `watchdog`_
   script, that watches the files in your project directory for changes and
   automatically re-builds the website.
 
