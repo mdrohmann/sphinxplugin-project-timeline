@@ -114,6 +114,8 @@ class SubmoduleNode(object):
             child.traverse_edge_lines(lines)
 
     def blockdiag_edge_format(self, fi, ci):
+        if not self.important:
+            return ""
         ret = '{} -> {}'.format(ci, fi)
         options = []
         if self.important:
@@ -123,6 +125,8 @@ class SubmoduleNode(object):
         return ret
 
     def blockdiag_node_format(self):
+        if not self.important:
+            return ""
         ret = self.get_full_id(True)
         pref = self.timechunk.parent.attributes['ids'][-1]
         options = []
